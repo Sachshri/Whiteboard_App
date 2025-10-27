@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
+import 'package:white_boarding_app/viewmodels/tool_viewmodel.dart';
 import '../models/drawing_objects.dart';
 import '../models/ui_state.dart';
 import '../models/white_board.dart';
@@ -11,40 +12,38 @@ import 'dart:math' as math; // Import math for boundary calculations
 // Provides the WhiteBoardHistory state for the active board
 final activeBoardHistoryProvider =
     StateNotifierProvider.family<
-        ActiveBoardNotifier,
-        WhiteBoardHistory,
-        WhiteBoard>((ref, initialBoard) {
-  return ActiveBoardNotifier(initialBoard, ref);
-});
-
+      ActiveBoardNotifier,
+      WhiteBoardHistory,
+      WhiteBoard
+    >((ref, initialBoard) {
+      return ActiveBoardNotifier(initialBoard, ref);
+    });
 // Provides the temporary object being drawn in real-time
 final currentDrawingObjectProvider = StateProvider<dynamic>((ref) => null);
 
-// NEW: Tracks IDs of selected objects (supports multi-selection)
-final selectedObjectIdsProvider =
-    StateProvider.family<Set<String>, WhiteBoard>((ref, initialBoard) => {});
+// Tracks IDs of selected objects (supports multi-selection)
+final selectedObjectIdsProvider = StateProvider.family<Set<String>, WhiteBoard>(
+  (ref, initialBoard) => {},
+);
 
-// NEW: Tracks the current interaction mode when selection tool is active
-final selectionModeProvider =
-    StateProvider.autoDispose<SelectionMode>((ref) => SelectionMode.none);
+// Tracks the current interaction mode when selection tool is active
+final selectionModeProvider = StateProvider.autoDispose<SelectionMode>(
+  (ref) => SelectionMode.none,
+);
 
-// NEW: Stores the position offset for drag/move operations (used for selection interaction)
+// Stores the position offset for drag/move operations (used for selection interaction)
 final dragOffsetProvider = StateProvider<Offset?>((ref) => null);
-
-// NEW: Provider to track the state of Shift or Ctrl key (for multi-select)
-// This should ideally be managed by a key-listening widget higher up,
-// but for a purely mobile/tap simulation, we'll keep it simple for now.
-// For a true desktop app, you'd listen to raw keyboard events.
 final isShiftControlPressedProvider = StateProvider<bool>((ref) => false);
-
 
 class ActiveBoardNotifier extends StateNotifier<WhiteBoardHistory> {
   final Ref _ref;
   final Uuid _uuid = const Uuid();
-  Offset? _startPosition; // Used for drawing shapes and selection interaction start point
+  Offset?
+  _startPosition; // Used for drawing shapes and selection interaction start point
+  final Set<String> _objectsErasedInThisStroke = {};
 
   ActiveBoardNotifier(WhiteBoard initialBoard, this._ref)
-      : super(WhiteBoardHistory.initial(initialBoard));
+    : super(WhiteBoardHistory.initial(initialBoard));
 
   WhiteBoard get _currentBoard => state.currentBoard;
   Slide get _currentSlide =>
@@ -74,11 +73,9 @@ class ActiveBoardNotifier extends StateNotifier<WhiteBoardHistory> {
     final newBoard = _currentBoard.copyWith(currentSlideIndex: newIndex);
     pushNewState(newBoard);
     // Clear selection when changing slides
-    _ref
-        .read(selectedObjectIdsProvider(newBoard).notifier)
-        .state = {};
+    _ref.read(selectedObjectIdsProvider(newBoard).notifier).state = {};
   }
-  
+
   void addSlide() {
     final newSlide = Slide(id: _uuid.v4());
     final List<Slide> newSlides = [..._currentBoard.slides, newSlide];
@@ -128,11 +125,26 @@ class ActiveBoardNotifier extends StateNotifier<WhiteBoardHistory> {
     );
     pushNewState(newBoard);
   }
+
   // --- DRAWING LOGIC ---
   void startDrawing(Offset position, ToolOptions options, ToolType type) {
     _startPosition = position;
     final String newId = _uuid.v4();
-
+    if (type == ToolType.eraser) {
+      if (options.eraserMode == EraserMode.pixel) {
+        final EraserObject newEraser = EraserObject(
+          id: newId,
+          points: [PointData(x: position.dx, y: position.dy)],
+          strokeWidth: options.eraserSize, // Use eraserSize
+        );
+        _ref.read(currentDrawingObjectProvider.notifier).state = newEraser;
+      } else {
+        // Stroke Mode: Clear the tracking set and erase at the start point
+        _objectsErasedInThisStroke.clear();
+        _eraseStrokeAt(position);
+      }
+      return; // Stop here
+    }
     if (type == ToolType.pencil) {
       final PenObject newPen = PenObject(
         id: newId,
@@ -169,7 +181,13 @@ class ActiveBoardNotifier extends StateNotifier<WhiteBoardHistory> {
   void updateDrawing(Offset position) {
     final currentObject = _ref.read(currentDrawingObjectProvider);
     if (currentObject == null) return;
-
+    if (currentObject is EraserObject) {
+      final updatedPoints = List<PointData>.from(currentObject.points)
+        ..add(PointData(x: position.dx, y: position.dy));
+      _ref.read(currentDrawingObjectProvider.notifier).state = currentObject
+          .copyWith(points: updatedPoints);
+      return; // Stop here
+    }
     if (currentObject is PenObject) {
       final updatedPoints = List<PointData>.from(currentObject.points)
         ..add(PointData(x: position.dx, y: position.dy));
@@ -191,14 +209,28 @@ class ActiveBoardNotifier extends StateNotifier<WhiteBoardHistory> {
 
   void endDrawing() {
     final currentObject = _ref.read(currentDrawingObjectProvider);
-
-    // Only commit if an object was actually drawn (e.g., pen has multiple points, shape has size)
+    final activeTool = _ref.read(toolStateProvider);
+    final options = _ref.read(toolOptionsProvider);
     bool shouldCommit = false;
-    if (currentObject is PenObject && currentObject.points.length > 1) {
+    if (activeTool == ToolType.eraser &&
+        options.eraserMode == EraserMode.stroke &&
+        _objectsErasedInThisStroke.isNotEmpty) {
+      pushNewState(_currentBoard);
+      _objectsErasedInThisStroke.clear();
+      return;
+    }
+    if (currentObject == null) {
+      _startPosition = null;
+      return;
+    }
+    if (currentObject is PenObject && currentObject.points.isNotEmpty) // This has the same meaninig as currentObject is PenObject && currentObject.points.length >= 1
+    {
       shouldCommit = true;
     } else if (currentObject is DrawingObject &&
         (currentObject.attributes.width.abs() > 2 ||
             currentObject.attributes.height.abs() > 2)) {
+      shouldCommit = true;
+    }else if (currentObject is EraserObject && currentObject.points.length > 1) {
       shouldCommit = true;
     }
 
@@ -222,7 +254,33 @@ class ActiveBoardNotifier extends StateNotifier<WhiteBoardHistory> {
 
 
   // --- NEW SELECTION & MODIFICATION LOGIC ---
+  void _eraseStrokeAt(Offset position) {
+    final hitObject = hitTest(position);
+    
+    if (hitObject != null && !_objectsErasedInThisStroke.contains(hitObject.id)) {
+      // Add to our set to avoid deleting it multiple times
+      _objectsErasedInThisStroke.add(hitObject.id);
+      
+      // Get the current objects and filter out the deleted ones
+      final newObjects = _currentSlide.objects
+          .where((obj) => !_objectsErasedInThisStroke.contains(obj.id))
+          .toList();
 
+      // Update the state TEMPORARILY (just like in updateSelectionInteraction)
+      // This gives a live preview without polluting the undo history.
+      final newSlide = _currentSlide.copyWith(objects: newObjects);
+      final newSlides = List<Slide>.from(_currentBoard.slides);
+      newSlides[_currentBoard.currentSlideIndex] = newSlide;
+      
+      state = state.copyWith(
+        history: [
+          ...state.history.sublist(0, state.currentIndex),
+          _currentBoard.copyWith(slides: newSlides),
+        ],
+        currentIndex: state.currentIndex,
+      );
+    }
+  }
   // Utility to get the Rect bounding box for any object
   Rect getBounds(dynamic object) {
     if (object is DrawingObject) {
@@ -241,12 +299,12 @@ class ActiveBoardNotifier extends StateNotifier<WhiteBoardHistory> {
       );
     } else if (object is PenObject) {
       if (object.points.isEmpty) return Rect.zero;
-      
+
       double minX = double.infinity;
       double minY = double.infinity;
       double maxX = double.negativeInfinity;
       double maxY = double.negativeInfinity;
-      
+
       for (var p in object.points) {
         minX = math.min(minX, p.x);
         minY = math.min(minY, p.y);
@@ -254,7 +312,7 @@ class ActiveBoardNotifier extends StateNotifier<WhiteBoardHistory> {
         maxY = math.max(maxY, p.y);
       }
       // Add padding for stroke width visualization and tolerance
-      final padding = object.strokeWidth / 2.0 + 4; 
+      final padding = object.strokeWidth / 2.0 + 4;
       return Rect.fromLTRB(
         minX - padding,
         minY - padding,
@@ -264,7 +322,7 @@ class ActiveBoardNotifier extends StateNotifier<WhiteBoardHistory> {
     }
     return Rect.zero;
   }
-  
+
   // Hit-testing utility
   dynamic hitTest(Offset position) {
     // Iterate in reverse to select the topmost object first
@@ -280,19 +338,30 @@ class ActiveBoardNotifier extends StateNotifier<WhiteBoardHistory> {
   }
 
   // Handle tap or selection start when in selection tool mode
-  void selectObjectAt(Offset position, WhiteBoard initialBoard, bool isShiftOrCtrl) {
-    final selectedObjectIdsNotifier =
-        _ref.read(selectedObjectIdsProvider(initialBoard).notifier);
+  void selectObjectAt(
+    Offset position,
+    WhiteBoard initialBoard,
+    bool isShiftOrCtrl,
+  ) {
+    final selectedObjectIdsNotifier = _ref.read(
+      selectedObjectIdsProvider(initialBoard).notifier,
+    );
     final currentSelection = selectedObjectIdsNotifier.state;
-    
+
     // 1. Check for resize handle hit first (only possible if ONE object is selected)
     final selectedObject = currentSelection.length == 1
-        ? _currentSlide.objects
-            .firstWhere((obj) => obj.id == currentSelection.single, orElse: () => null)
+        ? _currentSlide.objects.firstWhere(
+            (obj) => obj.id == currentSelection.single,
+            orElse: () => null,
+          )
         : null;
-        
+
     if (selectedObject != null) {
-      final hitMode = _hitTestHandles(getBounds(selectedObject), position, selectedObject);
+      final hitMode = _hitTestHandles(
+        getBounds(selectedObject),
+        position,
+        selectedObject,
+      );
       if (hitMode != SelectionMode.none) {
         _ref.read(selectionModeProvider.notifier).state = hitMode;
         _startPosition = position;
@@ -305,12 +374,14 @@ class ActiveBoardNotifier extends StateNotifier<WhiteBoardHistory> {
 
     if (hitObject != null) {
       final hitId = hitObject.id;
-      
+
       if (isShiftOrCtrl) {
         // Shift/Ctrl + click selection: Add or remove from selection
         if (currentSelection.contains(hitId)) {
           // Remove object
-          selectedObjectIdsNotifier.state = currentSelection.where((id) => id != hitId).toSet();
+          selectedObjectIdsNotifier.state = currentSelection
+              .where((id) => id != hitId)
+              .toSet();
         } else {
           // Add object
           selectedObjectIdsNotifier.state = {...currentSelection, hitId};
@@ -319,7 +390,7 @@ class ActiveBoardNotifier extends StateNotifier<WhiteBoardHistory> {
         // Single selection (or start of drag): select this one object
         selectedObjectIdsNotifier.state = {hitId};
       }
-      
+
       // If an object is selected/hit, start move mode
       _ref.read(selectionModeProvider.notifier).state = SelectionMode.moving;
       _startPosition = position;
@@ -330,18 +401,18 @@ class ActiveBoardNotifier extends StateNotifier<WhiteBoardHistory> {
       _startPosition = null;
     }
   }
-  
+
   // Test if a resize handle was hit
   SelectionMode _hitTestHandles(Rect bounds, Offset position, dynamic object) {
     // Resizing only supported for DrawingObjects (shapes) currently
     // We *could* implement PenObject resizing by scaling all points, but we'll stick to shapes for now.
-    if (object is! DrawingObject) return SelectionMode.none; 
-    
+    if (object is! DrawingObject) return SelectionMode.none;
+
     const double handleSize = 12.0;
-    
+
     // Define handle rects (centered at corners) on the inflated bounds (for better tapping)
     final inflatedBounds = bounds.inflate(4);
-    
+
     // Center of the handle circles
     final handles = {
       SelectionMode.resizingTl: inflatedBounds.topLeft,
@@ -349,10 +420,13 @@ class ActiveBoardNotifier extends StateNotifier<WhiteBoardHistory> {
       SelectionMode.resizingBl: inflatedBounds.bottomLeft,
       SelectionMode.resizingBr: inflatedBounds.bottomRight,
     };
-    
+
     // Hit-test the circle area around each corner point
     for (var entry in handles.entries) {
-      final handleRect = Rect.fromCircle(center: entry.value, radius: handleSize / 2);
+      final handleRect = Rect.fromCircle(
+        center: entry.value,
+        radius: handleSize / 2,
+      );
       if (handleRect.contains(position)) {
         return entry.key;
       }
@@ -361,39 +435,41 @@ class ActiveBoardNotifier extends StateNotifier<WhiteBoardHistory> {
   }
 
   void updateSelectionInteraction(Offset position) {
-    if (_startPosition == null || _ref.read(selectionModeProvider) == SelectionMode.none) return;
-    
+    if (_startPosition == null ||
+        _ref.read(selectionModeProvider) == SelectionMode.none)
+      return;
+
     final currentMode = _ref.read(selectionModeProvider);
     final selectedIds = _ref.read(selectedObjectIdsProvider(_currentBoard));
-    
+
     if (selectedIds.isEmpty) return;
-    
+
     final delta = position - _startPosition!;
-    
+
     // Create a new list of objects
     List<dynamic> updatedObjects = List.from(_currentSlide.objects);
-    
+
     for (final id in selectedIds) {
       final index = updatedObjects.indexWhere((obj) => obj.id == id);
       if (index == -1) continue;
-      
+
       final object = updatedObjects[index];
-      
+
       if (currentMode == SelectionMode.moving) {
         updatedObjects[index] = _applyMove(object, delta);
       } else if (currentMode.toString().startsWith('resizing')) {
-        // Only allow resizing for single selected DrawingObjects 
+        // Only allow resizing for single selected DrawingObjects
         if (object is DrawingObject && selectedIds.length == 1) {
           updatedObjects[index] = _applyResize(object, delta, currentMode);
         }
       }
     }
-    
+
     // Update the temporary drawing state with the moved/resized object(s)
     final newSlide = _currentSlide.copyWith(objects: updatedObjects);
     final newSlides = List<Slide>.from(_currentBoard.slides);
     newSlides[_currentBoard.currentSlideIndex] = newSlide;
-    
+
     // We update the state of the active board directly (without pushNewState yet)
     state = state.copyWith(
       history: [
@@ -402,7 +478,7 @@ class ActiveBoardNotifier extends StateNotifier<WhiteBoardHistory> {
       ],
       currentIndex: state.currentIndex,
     );
-    
+
     // Update the start position to the current position for continuous delta calculation
     _startPosition = position;
   }
@@ -415,7 +491,7 @@ class ActiveBoardNotifier extends StateNotifier<WhiteBoardHistory> {
     _ref.read(selectionModeProvider.notifier).state = SelectionMode.none;
     _startPosition = null;
   }
-  
+
   // Helper to apply move logic
   dynamic _applyMove(dynamic object, Offset delta) {
     if (object is PenObject) {
@@ -433,17 +509,21 @@ class ActiveBoardNotifier extends StateNotifier<WhiteBoardHistory> {
     }
     return object;
   }
-  
+
   // Helper to apply resize logic for DrawingObjects
-  DrawingObject _applyResize(DrawingObject object, Offset delta, SelectionMode mode) {
+  DrawingObject _applyResize(
+    DrawingObject object,
+    Offset delta,
+    SelectionMode mode,
+  ) {
     final currentAttr = object.attributes;
-    
+
     // Recalculate based on current bounding box (normalized coordinates)
     final currentBounds = getBounds(object);
-    
+
     Offset anchor; // The corner that stays fixed
     Offset currentHandle; // The corner that moves
-    
+
     // Determine the anchor (fixed) point and the point being dragged
     switch (mode) {
       case SelectionMode.resizingTl:
@@ -465,37 +545,39 @@ class ActiveBoardNotifier extends StateNotifier<WhiteBoardHistory> {
       default:
         return object;
     }
-    
+
     // Recalculate new bounding box: [l, t, r, b]
     final l = math.min(anchor.dx, currentHandle.dx);
     final t = math.min(anchor.dy, currentHandle.dy);
     final r = math.max(anchor.dx, currentHandle.dx);
     final b = math.max(anchor.dy, currentHandle.dy);
-    
+
     // Enforce a minimum size
     const double minSize = 10.0;
     final newWidth = math.max(minSize, r - l);
     final newHeight = math.max(minSize, b - t);
-    
+
     // Update X, Y based on the new top-left corner (l, t)
     // We re-create attributes to normalize x/y/width/height based on new bounding box
-    return object.copyWith(attributes: Attributes(
-      x: l,
-      y: t,
-      width: newWidth,
-      height: newHeight,
-      strokeWidth: currentAttr.strokeWidth,
-      strokeColor: currentAttr.strokeColor,
-      fillColor: currentAttr.fillColor,
-      opacity: currentAttr.opacity,
-    ));
+    return object.copyWith(
+      attributes: Attributes(
+        x: l,
+        y: t,
+        width: newWidth,
+        height: newHeight,
+        strokeWidth: currentAttr.strokeWidth,
+        strokeColor: currentAttr.strokeColor,
+        fillColor: currentAttr.fillColor,
+        opacity: currentAttr.opacity,
+      ),
+    );
   }
-  
+
   void deleteSelectedObjects(WhiteBoard initialBoard) {
     final selectedIds = _ref.read(selectedObjectIdsProvider(initialBoard));
-    
+
     if (selectedIds.isEmpty) return;
-    
+
     final List<dynamic> newObjects = _currentSlide.objects
         .where((obj) => !selectedIds.contains(obj.id))
         .toList();
@@ -506,12 +588,12 @@ class ActiveBoardNotifier extends StateNotifier<WhiteBoardHistory> {
 
     final newBoard = _currentBoard.copyWith(slides: newSlides);
     pushNewState(newBoard);
-    
+
     // Clear selection
     _ref.read(selectedObjectIdsProvider(initialBoard).notifier).state = {};
     _ref.read(selectionModeProvider.notifier).state = SelectionMode.none;
   }
-  
+
   // NEW: Duplicate Selected Objects Logic (Ctrl+D or Alt+Drag)
   void duplicateSelectedObjects(WhiteBoard initialBoard) {
     final selectedIds = _ref.read(selectedObjectIdsProvider(initialBoard));
@@ -551,11 +633,12 @@ class ActiveBoardNotifier extends StateNotifier<WhiteBoardHistory> {
       final newSlides = List<Slide>.from(_currentBoard.slides);
       newSlides[_currentBoard.currentSlideIndex] = newSlide;
       final newBoard = _currentBoard.copyWith(slides: newSlides);
-      
+
       pushNewState(newBoard);
-      
+
       // Select the newly duplicated objects
-      _ref.read(selectedObjectIdsProvider(initialBoard).notifier).state = newSelectedIds;
+      _ref.read(selectedObjectIdsProvider(initialBoard).notifier).state =
+          newSelectedIds;
       _ref.read(selectionModeProvider.notifier).state = SelectionMode.moving;
       // Note: _startPosition is not set here, so the next pan update will use the delta logic.
       // If we wanted to immediately start dragging, we'd need to adjust interaction flow.

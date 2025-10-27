@@ -7,8 +7,8 @@ import 'package:white_boarding_app/models/drawing_objects.dart';
 import 'package:white_boarding_app/models/ui_state.dart';
 import 'package:white_boarding_app/view/white_board_screen.dart';
 import 'package:white_boarding_app/viewmodels/active_board_viewmodel.dart';
-import '../models/white_board.dart';
-import '../viewmodels/tool_viewmodel.dart';
+import '../../models/white_board.dart';
+import '../../viewmodels/tool_viewmodel.dart';
 
 class CanvasWidget extends ConsumerWidget {
   final WhiteBoard whiteBoard;
@@ -29,7 +29,9 @@ class CanvasWidget extends ConsumerWidget {
     );
     final selectedIds = ref.watch(selectedObjectIdsProvider(initialBoard));
     final selectionMode = ref.watch(selectionModeProvider);
-    final isShiftOrCtrl = ref.watch(isShiftControlPressedProvider); // NEW: Watch key state
+    final isShiftOrCtrl = ref.watch(
+      isShiftControlPressedProvider,
+    ); // NEW: Watch key state
 
     final toolOptions = ref.watch(toolOptionsProvider);
 
@@ -38,50 +40,53 @@ class CanvasWidget extends ConsumerWidget {
 
     // Focus node to listen to keyboard events (for desktop/web)
     final FocusNode focusNode = FocusNode(debugLabel: 'Canvas Focus');
-    
+
     // Listen for Ctrl+A (Select All) and Delete/Backspace
     void handleKeyEvent(RawKeyEvent event) {
-        if (event is RawKeyDownEvent) {
-          final isMetaOrCtrl = event.isMetaPressed || event.isControlPressed;
-          final isShift = event.isShiftPressed;
+      if (event is RawKeyDownEvent) {
+        final isMetaOrCtrl = event.isMetaPressed || event.isControlPressed;
+        final isShift = event.isShiftPressed;
 
-          // NEW: Update isShiftControlPressedProvider (for UI feedback, and selection logic)
-          if (isMetaOrCtrl || isShift) {
-             ref.read(isShiftControlPressedProvider.notifier).state = true;
-          }
+        // NEW: Update isShiftControlPressedProvider (for UI feedback, and selection logic)
+        if (isMetaOrCtrl || isShift) {
+          ref.read(isShiftControlPressedProvider.notifier).state = true;
+        }
 
-          if (isMetaOrCtrl) {
-            if (event.logicalKey == LogicalKeyboardKey.keyA) {
-              // Ctrl+A: Select all
-              final allObjectIds = activeBoard.slides[activeBoard.currentSlideIndex].objects
-                  .map((obj) => obj.id)
-                  .toSet().cast<String>();
-              ref.read(selectedObjectIdsProvider(initialBoard).notifier).state = allObjectIds;
-            } else if (event.logicalKey == LogicalKeyboardKey.keyV) {
-              // Ctrl+V: Duplicate (trigger duplicate logic)
-              activeBoardNotifier.duplicateSelectedObjects(initialBoard);
-            }
-          }
-          
-          if (event.logicalKey == LogicalKeyboardKey.delete || 
-              event.logicalKey == LogicalKeyboardKey.backspace) {
-            // Delete: Remove selected objects
-            activeBoardNotifier.deleteSelectedObjects(initialBoard);
-          }
-           if (event.logicalKey == LogicalKeyboardKey.escape) {
-            // Esc: Deselect
-            ref.read(selectedObjectIdsProvider(initialBoard).notifier).state = {};
-            ref.read(selectionModeProvider.notifier).state = SelectionMode.none;
-          }
-        } else if (event is RawKeyUpEvent) {
-           final isMetaOrCtrl = event.isMetaPressed || event.isControlPressed;
-           final isShift = event.isShiftPressed;
-           if (!isMetaOrCtrl && !isShift) {
-             ref.read(isShiftControlPressedProvider.notifier).state = false;
+        if (isMetaOrCtrl) {
+          if (event.logicalKey == LogicalKeyboardKey.keyA) {
+            // Ctrl+A: Select all
+            final allObjectIds = activeBoard
+                .slides[activeBoard.currentSlideIndex]
+                .objects
+                .map((obj) => obj.id)
+                .toSet()
+                .cast<String>();
+            ref.read(selectedObjectIdsProvider(initialBoard).notifier).state =
+                allObjectIds;
+          } else if (event.logicalKey == LogicalKeyboardKey.keyV) {
+            // Ctrl+V: Duplicate (trigger duplicate logic)
+            activeBoardNotifier.duplicateSelectedObjects(initialBoard);
           }
         }
-    }
 
+        if (event.logicalKey == LogicalKeyboardKey.delete ||
+            event.logicalKey == LogicalKeyboardKey.backspace) {
+          // Delete: Remove selected objects
+          activeBoardNotifier.deleteSelectedObjects(initialBoard);
+        }
+        if (event.logicalKey == LogicalKeyboardKey.escape) {
+          // Esc: Deselect
+          ref.read(selectedObjectIdsProvider(initialBoard).notifier).state = {};
+          ref.read(selectionModeProvider.notifier).state = SelectionMode.none;
+        }
+      } else if (event is RawKeyUpEvent) {
+        final isMetaOrCtrl = event.isMetaPressed || event.isControlPressed;
+        final isShift = event.isShiftPressed;
+        if (!isMetaOrCtrl && !isShift) {
+          ref.read(isShiftControlPressedProvider.notifier).state = false;
+        }
+      }
+    }
 
     void handlePanStart(Offset position) {
       if ([
@@ -90,12 +95,17 @@ class CanvasWidget extends ConsumerWidget {
         ToolType.circle,
         ToolType.line,
         ToolType.arrow,
+        ToolType.eraser,
       ].contains(activeTool)) {
         // Start drawing for creation tools
         activeBoardNotifier.startDrawing(position, toolOptions, activeTool);
       } else if (activeTool == ToolType.selection) {
         // NEW: Start selection or manipulation, passing the key state
-        activeBoardNotifier.selectObjectAt(position, initialBoard, isShiftOrCtrl); 
+        activeBoardNotifier.selectObjectAt(
+          position,
+          initialBoard,
+          isShiftOrCtrl,
+        );
       } else if (activeTool == ToolType.pan) {
         // TODO: Implement pan start logic
         debugPrint("Pan started at $position");
@@ -105,8 +115,12 @@ class CanvasWidget extends ConsumerWidget {
     void handlePanUpdate(Offset position) {
       if (currentDrawingObject != null) {
         activeBoardNotifier.updateDrawing(position);
-      } else if (activeTool == ToolType.selection && selectionMode != SelectionMode.none) {
-        // NEW: Move or resize the selected object(s)
+      } else if (activeTool == ToolType.eraser) {
+        // This will trigger the _eraseStrokeAt(position) logic
+        activeBoardNotifier.updateDrawing(position);
+      } else if (activeTool == ToolType.selection &&
+          selectionMode != SelectionMode.none) {
+        //  Move or resize the selected object(s)
         activeBoardNotifier.updateSelectionInteraction(position);
       } else if (activeTool == ToolType.pan) {
         // TODO: Implement pan update logic (move the canvas view/objects)
@@ -116,7 +130,8 @@ class CanvasWidget extends ConsumerWidget {
     void handlePanEnd(DragEndDetails details) {
       if (currentDrawingObject != null) {
         activeBoardNotifier.endDrawing();
-      } else if (activeTool == ToolType.selection && selectionMode != SelectionMode.none) {
+      } else if (activeTool == ToolType.selection &&
+          selectionMode != SelectionMode.none) {
         // NEW: Commit move or resize to history
         activeBoardNotifier.commitSelectionInteraction();
       } else if (activeTool == ToolType.pan) {
@@ -138,7 +153,7 @@ class CanvasWidget extends ConsumerWidget {
       child: GestureDetector(
         onPanStart: (details) {
           // Request focus on interaction start for keyboard listeners to work
-          focusNode.requestFocus(); 
+          focusNode.requestFocus();
           handlePanStart(details.localPosition);
         },
         onPanUpdate: (details) => handlePanUpdate(details.localPosition),
@@ -147,7 +162,11 @@ class CanvasWidget extends ConsumerWidget {
           // Handle tap-down when not dragging (for immediate deselect or single select)
           if (activeTool == ToolType.selection) {
             // Re-run selectObjectAt here to handle single tap deselect logic
-            activeBoardNotifier.selectObjectAt(details.localPosition, initialBoard, isShiftOrCtrl);
+            activeBoardNotifier.selectObjectAt(
+              details.localPosition,
+              initialBoard,
+              isShiftOrCtrl,
+            );
           }
         },
         onDoubleTapDown: (details) => handleDoubleTap(details.localPosition),
@@ -181,7 +200,8 @@ class WhiteBoardPainter extends CustomPainter {
   final dynamic currentDrawingObject; // The object being actively drawn
   final Set<String> selectedObjectIds; // IDs of currently selected objects
   final SelectionMode selectionMode; // NEW: Current mode for cursor feedback
-  final ActiveBoardNotifier activeBoardNotifier; // NEW: Access to bounds utility
+  final ActiveBoardNotifier
+  activeBoardNotifier; // NEW: Access to bounds utility
 
   WhiteBoardPainter({
     required this.whiteBoard,
@@ -193,7 +213,7 @@ class WhiteBoardPainter extends CustomPainter {
 
   // Utility to get the Rect bounding box (from ActiveBoardNotifier)
   Rect _getBounds(dynamic object) => activeBoardNotifier.getBounds(object);
-  
+
   // Utility to convert hex string to Color
   Color _colorFromHex(String hexColor, double opacity) {
     hexColor = hexColor.replaceAll("#", "");
@@ -217,17 +237,32 @@ class WhiteBoardPainter extends CustomPainter {
   }
 
   // Utility to draw a PenObject (Path)
+  // Utility to draw a PenObject (Path OR Dot)
   void _drawPenObject(Canvas canvas, PenObject object) {
     final paint = _getPenPaint(object);
-    final path = Path();
 
-    if (object.points.isNotEmpty) {
+    if (object.points.isEmpty) return; // Nothing to draw
+
+    if (object.points.length == 1) {
+      // --- DRAW A DOT ---
+      // A single point is a dot. Draw a filled circle.
+      // Use strokeWidth as the diameter.
+      paint.style = PaintingStyle.fill;
+      canvas.drawCircle(
+        Offset(object.points.first.x, object.points.first.y),
+        object.strokeWidth / 2, // Radius
+        paint,
+      );
+    } else {
+      // --- DRAW A LINE ---
+      // (The paint style is already 'stroke' from _getPenPaint)
+      final path = Path();
       path.moveTo(object.points.first.x, object.points.first.y);
       for (int i = 1; i < object.points.length; i++) {
         path.lineTo(object.points[i].x, object.points[i].y);
       }
+      canvas.drawPath(path, paint);
     }
-    canvas.drawPath(path, paint);
   }
 
   // Utility to draw generic DrawingObjects (shapes)
@@ -276,6 +311,31 @@ class WhiteBoardPainter extends CustomPainter {
     // TODO: Add logic for 'text', 'image' here
   }
 
+  //Utility for Erase Function
+  Paint _getEraserPaint(EraserObject object) {
+    return Paint()
+      ..color = Colors
+          .transparent // Color doesn't matter
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round
+      ..strokeWidth = object.strokeWidth
+      ..style = PaintingStyle.stroke
+      ..blendMode = BlendMode.clear; // <-- THE MAGIC
+  }
+
+  void _drawEraserObject(Canvas canvas, EraserObject object, Paint paint) {
+    final path = Path();
+    final paint = _getEraserPaint(object);
+    if (object.points.isNotEmpty) {
+      path.moveTo(object.points.first.x, object.points.first.y);
+      for (int i = 1; i < object.points.length; i++) {
+        path.lineTo(object.points[i].x, object.points[i].y);
+      }
+    }
+    // We pass in the pre-configured eraser paint
+    canvas.drawPath(path, paint);
+  }
+
   // Utility to draw an arrowhead at the end of a line
   void _drawArrowhead(Canvas canvas, Offset start, Offset end, Paint paint) {
     const double arrowLength = 15;
@@ -303,7 +363,7 @@ class WhiteBoardPainter extends CustomPainter {
   // NEW: Draw selection box and handles
   void _drawSelectionBox(Canvas canvas, Rect bounds, dynamic object) {
     const double handleSize = 12.0;
-    
+
     // Draw dashed border
     final borderPaint = Paint()
       ..color = const Color(0xFF55B8B9)
@@ -312,13 +372,13 @@ class WhiteBoardPainter extends CustomPainter {
 
     const dashWidth = 8.0;
     const dashSpace = 4.0;
-    
+
     // Use an inflated rect for a slight border offset (this is where the handles sit)
     final inflatedBounds = bounds.inflate(4);
-    
+
     // Draw dashed path (simplified implementation)
     Path dashPath = Path();
-    
+
     // Line drawing utility for dashed effect
     void drawDashedLine(Offset p1, Offset p2) {
       final distance = (p2 - p1).distance;
@@ -328,7 +388,7 @@ class WhiteBoardPainter extends CustomPainter {
         final startY = p1.dy + math.sin(angle) * i;
         final endX = p1.dx + math.cos(angle) * (i + dashWidth);
         final endY = p1.dy + math.sin(angle) * (i + dashWidth);
-        
+
         dashPath.moveTo(startX, startY);
         dashPath.lineTo(endX, endY);
       }
@@ -338,7 +398,7 @@ class WhiteBoardPainter extends CustomPainter {
     drawDashedLine(inflatedBounds.topRight, inflatedBounds.bottomRight);
     drawDashedLine(inflatedBounds.bottomRight, inflatedBounds.bottomLeft);
     drawDashedLine(inflatedBounds.bottomLeft, inflatedBounds.topLeft);
-    
+
     canvas.drawPath(dashPath, borderPaint);
 
     // Only draw resize handles for DrawingObjects (shapes)
@@ -347,12 +407,12 @@ class WhiteBoardPainter extends CustomPainter {
       final handlePaint = Paint()
         ..color = const Color(0xFF55B8B9)
         ..style = PaintingStyle.fill;
-      
+
       final handleBorderPaint = Paint()
         ..color = Colors.white
         ..strokeWidth = 1.0
         ..style = PaintingStyle.stroke;
-      
+
       // Draw corner handles on the inflated bounds
       final handles = [
         inflatedBounds.topLeft,
@@ -360,7 +420,7 @@ class WhiteBoardPainter extends CustomPainter {
         inflatedBounds.bottomLeft,
         inflatedBounds.bottomRight,
       ];
-      
+
       for (var center in handles) {
         canvas.drawCircle(center, handleSize / 2, handlePaint);
         canvas.drawCircle(center, handleSize / 2, handleBorderPaint);
@@ -371,16 +431,30 @@ class WhiteBoardPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final currentSlide = whiteBoard.slides[whiteBoard.currentSlideIndex];
-    
-    // List to keep track of objects that need selection drawing (for drawing on top)
     List<dynamic> objectsToDrawSelection = [];
 
-    // 1. Draw Saved Objects
+    // --- 1. Main Drawing Pass ---
+    // We create a single saveLayer to draw all content and holes onto.
+    final allDrawingBounds = Rect.fromLTWH(0, 0, size.width, size.height);
+    canvas.saveLayer(allDrawingBounds, Paint());
+
+    // Create a single, reusable eraser paint
+    final eraserPaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round
+      ..blendMode = BlendMode.clear; // The "hole punch"
+
+    // --- Process all saved objects IN ORDER ---
     for (var object in currentSlide.objects) {
       if (object is PenObject) {
         _drawPenObject(canvas, object);
       } else if (object is DrawingObject) {
         _drawDrawingObject(canvas, object);
+      } else if (object is EraserObject) {
+        // Apply the eraser "hole punch" as we find it
+        eraserPaint.strokeWidth = object.strokeWidth;
+        _drawEraserObject(canvas, object, eraserPaint);
       }
       
       // Collect selected objects
@@ -389,16 +463,27 @@ class WhiteBoardPainter extends CustomPainter {
       }
     }
 
-    // 2. Draw the actively drawn object (real-time feedback for creation tools)
+    // --- 2. Draw the actively drawn object (real-time feedback) ---
+    // This will also be drawn on top of (or erased by)
+    // objects that came before it.
     if (currentDrawingObject != null) {
       if (currentDrawingObject is PenObject) {
         _drawPenObject(canvas, currentDrawingObject!);
       } else if (currentDrawingObject is DrawingObject) {
         _drawDrawingObject(canvas, currentDrawingObject!);
+      } else if (currentDrawingObject is EraserObject) {
+        // Apply the current eraser path
+        eraserPaint.strokeWidth = currentDrawingObject.strokeWidth;
+        _drawEraserObject(canvas, currentDrawingObject, eraserPaint);
       }
     }
     
-    // 3. Draw Selection Boxes (drawn last to overlay objects)
+    // --- 3. Restore the layer ---
+    // This flattens our final "holey" image onto the main canvas.
+    canvas.restore();
+
+    // --- 4. Draw Selection Boxes ---
+    // These are drawn *after* restore, so they are not erased.
     for (var object in objectsToDrawSelection) {
       final bounds = _getBounds(object);
       _drawSelectionBox(canvas, bounds, object);
@@ -417,8 +502,10 @@ class WhiteBoardPainter extends CustomPainter {
 
     final currentDrawingChanged =
         oldDelegate.currentDrawingObject != currentDrawingObject;
-        
-    final selectionChanged = oldDelegate.selectedObjectIds != selectedObjectIds || oldDelegate.selectionMode != selectionMode;
+
+    final selectionChanged =
+        oldDelegate.selectedObjectIds != selectedObjectIds ||
+        oldDelegate.selectionMode != selectionMode;
 
     return objectsChanged || currentDrawingChanged || selectionChanged;
   }

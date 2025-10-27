@@ -1,14 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:white_boarding_app/viewmodels/white_board_viewmodel.dart';
-import 'package:white_boarding_app/widgets/dialog_boxes.dart';
-import 'package:white_boarding_app/widgets/slide_thumbnail_canvas.dart';
+import 'package:white_boarding_app/view/widgets/dialog_boxes.dart';
+import 'package:white_boarding_app/view/widgets/slide_thumbnail_canvas.dart';
 import '../models/white_board.dart';
 import '../models/white_board_history.dart';
 import '../models/ui_state.dart';
 import '../viewmodels/tool_viewmodel.dart';
 import '../viewmodels/active_board_viewmodel.dart';
-import '../widgets/canvas_widget.dart';
+import 'widgets/canvas_widget.dart';
 
 final slideManagerVisibleProvider = StateProvider<bool>((ref) => true);
 
@@ -392,7 +392,7 @@ Widget _buildMobileBottomBar(
  final notifier = ref.read(activeBoardHistoryProvider(whiteBoard).notifier);
  final currentSlideIndex = activeBoard.currentSlideIndex;
  final options = ref.watch(toolOptionsProvider);
-
+  final optionsNotifier = ref.read(toolOptionsProvider.notifier);
  return SingleChildScrollView(
   scrollDirection: Axis.horizontal,
    child: Container(
@@ -527,7 +527,57 @@ Widget _buildMobileBottomBar(
      ),
      ),
     ],
-   
+    if (activeTool == ToolType.eraser) ...[
+            // Eraser Mode: Stroke (Erase by object)
+            IconButton(
+              icon: Icon(
+                Icons.show_chart,
+                color: options.eraserMode == EraserMode.stroke
+                    ? const Color(0xFF55B8B9)
+                    : Colors.black54,
+              ),
+              tooltip: 'Erase by object/stroke',
+              onPressed: () => optionsNotifier.state =
+                  options.copyWith(eraserMode: EraserMode.stroke),
+            ),
+            // Eraser Mode: Pixel (Smooth erase)
+            IconButton(
+              icon: Icon(
+                Icons.brush, // Using 'brush' to represent pixel
+                color: options.eraserMode == EraserMode.pixel
+                    ? const Color(0xFF55B8B9)
+                    : Colors.black54,
+              ),
+              tooltip: 'Pixel eraser',
+              onPressed: () => optionsNotifier.state =
+                  options.copyWith(eraserMode: EraserMode.pixel),
+            ),
+            
+            const SizedBox(width: 5),
+
+            // Eraser Size Selector (Interactive)
+            GestureDetector(
+              onTap: () => _showEraserSizeSelector(
+                context,
+                ref,
+              ), // Show the NEW modal on tap
+              child: Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  border: Border.all(color: Colors.black, width: 1.0),
+                  borderRadius: BorderRadius.circular(5),
+                ),
+                child: Center(
+                  child: Text(
+                    options.eraserSize.round().toString(), // Read eraserSize
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                ),
+              ),
+            ),
+          ],  
+          const SizedBox(width: 10),
     // Current Active Tool Icon
     Container(
      padding: const EdgeInsets.all(8),
@@ -546,140 +596,183 @@ Widget _buildMobileBottomBar(
 }
 
 Widget _buildToolPropertiesPanel(
- WidgetRef ref,
- ToolType activeTool,
- bool isDesktop,
+  WidgetRef ref,
+  ToolType activeTool,
+  bool isDesktop,
 ) {
- final options = ref.watch(toolOptionsProvider);
- final optionsNotifier = ref.read(toolOptionsProvider.notifier);
-  // NEW: Check if an object is selected
+  final options = ref.watch(toolOptionsProvider);
+  final optionsNotifier = ref.read(toolOptionsProvider.notifier);
   final selectedIds = ref.watch(selectedObjectIdsProvider(whiteBoard));
   final isObjectSelected = selectedIds.isNotEmpty;
   final notifier = ref.read(activeBoardHistoryProvider(whiteBoard).notifier);
-  
-  // Logic: Show creation tool properties OR selection tool properties
-  
+
+  // Logic: Show selection tool properties IF active and object is selected
   if (activeTool == ToolType.selection && isObjectSelected) {
-     // SELECTION TOOL PROPERTIES (Delete/Duplicate/Modify)
-     return Row(
-       children: [
-         const Text(
-           "Selection:",
-           style: TextStyle(fontWeight: FontWeight.w500, fontSize: 14),
-         ),
-         const SizedBox(width: 10),
-         
-         // Delete Button
-         IconButton(
-           icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
-           tooltip: 'Delete Selected Object(s) (Delete/Backspace)',
-           onPressed: () => notifier.deleteSelectedObjects(whiteBoard),
-         ),
-         
-         // Duplicate Button (Ctrl+V)
-         IconButton(
-           icon: const Icon(Icons.copy_all_outlined, color: Colors.black54),
-           tooltip: 'Duplicate Selected Object(s) (Ctrl+V)',
-           onPressed: () => notifier.duplicateSelectedObjects(whiteBoard), // Call new method
-         ),
-         const SizedBox(width: 10),
-         // TODO: Add controls for changing attributes (color, thickness) of selected object here
-         
-       ],
-     );
-   }
+    return Row(
+      children: [
+        const Text(
+          "Selection:",
+          style: TextStyle(fontWeight: FontWeight.w500, fontSize: 14),
+        ),
+        const SizedBox(width: 10),
+        IconButton(
+          icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
+          tooltip: 'Delete Selected Object(s) (Delete/Backspace)',
+          onPressed: () => notifier.deleteSelectedObjects(whiteBoard),
+        ),
+        IconButton(
+          icon: const Icon(Icons.copy_all_outlined, color: Colors.black54),
+          tooltip: 'Duplicate Selected Object(s) (Ctrl+V)',
+          onPressed: () => notifier.duplicateSelectedObjects(whiteBoard),
+        ),
+        // TODO: Add controls for changing attributes
+      ],
+    );
+  }
 
- if (![
- ToolType.pencil,
- ToolType.rectangle,
- ToolType.circle,
- ToolType.line,
- ToolType.arrow,
- ToolType.text,
- ToolType.eraser,
- ].contains(activeTool)) {
- return const SizedBox.shrink();
- }
+  // --- Properties for DRAWING tools ---
+  if ([
+    ToolType.pencil,
+    ToolType.rectangle,
+    ToolType.circle,
+    ToolType.line,
+    ToolType.arrow,
+    ToolType.text,
+  ].contains(activeTool)) {
+    if (isDesktop) {
+      return Row(
+        mainAxisAlignment: MainAxisAlignment.start,
+        children: [
+          const Padding(
+            padding: EdgeInsets.only(right: 10),
+            child: Text(
+              "Properties:",
+              style: TextStyle(fontWeight: FontWeight.w500, fontSize: 14),
+            ),
+          ),
+          SizedBox(
+            width: 150,
+            child: Slider(
+              value: options.strokeWidth, // Correct: strokeWidth
+              activeColor: Colors.blue,
+              min: 1,
+              max: 16,
+              divisions: 15,
+              onChanged: (v) =>
+                  optionsNotifier.state = options.copyWith(strokeWidth: v),
+            ),
+          ),
+          const SizedBox(width: 10),
+          SizedBox(
+            width: 30,
+            child: Text(
+              options.strokeWidth.toStringAsFixed(0),
+              style: TextStyle(fontWeight: FontWeight.bold),
+              textAlign: TextAlign.center,
+            ),
+          ),
+          const SizedBox(width: 20),
+          const Text("Color: "),
+          InkWell(
+            // onTap: () => _showColorPicker(context, ref, 'color'),
+            child: Container(
+              width: 24,
+              height: 24,
+              decoration: BoxDecoration(
+                color: Color(int.parse(options.color.replaceAll('#', '0xFF'))),
+                shape: BoxShape.circle,
+                border: Border.all(color: Colors.black26),
+              ),
+            ),
+          ),
+          const SizedBox(width: 20),
+          if ([ToolType.rectangle, ToolType.circle].contains(activeTool)) ...[
+            const Text("Fill: "),
+            InkWell(
+              // onTap: () => _showColorPicker(context, ref, 'fillColor'),
+              child: Container(
+                width: 24,
+                height: 24,
+                decoration: BoxDecoration(
+                  color: Color(
+                      int.parse(options.fillColor.replaceAll('#', '0xFF'))),
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.black26),
+                ),
+              ),
+            ),
+          ],
+        ],
+      );
+    }
+  }
 
- if (isDesktop) {
- return Row(
-  mainAxisAlignment: MainAxisAlignment.start,
-  children: [
-  const Padding(
-   padding: EdgeInsets.only(right: 10),
-   child: Text(
-   "Properties:",
-   style: TextStyle(fontWeight: FontWeight.w500, fontSize: 14),
-   ),
-  ),
+  // --- Properties for ERASER tool ---
+  if (activeTool == ToolType.eraser) {
+    if (isDesktop) {
+      return Row(
+        mainAxisAlignment: MainAxisAlignment.start,
+        children: [
+          const Padding(
+            padding: EdgeInsets.only(right: 10),
+            child: Text(
+              "Eraser:",
+              style: TextStyle(fontWeight: FontWeight.w500, fontSize: 14),
+            ),
+          ),
+          // Eraser Mode: Stroke
+          IconButton(
+            icon: Icon(
+              Icons.show_chart,
+              color: options.eraserMode == EraserMode.stroke
+                  ? const Color(0xFF55B8B9)
+                  : Colors.black54,
+            ),
+            tooltip: 'Erase by object/stroke',
+            onPressed: () => optionsNotifier.state =
+                options.copyWith(eraserMode: EraserMode.stroke),
+          ),
+          // Eraser Mode: Pixel
+          IconButton(
+            icon: Icon(
+              Icons.brush,
+              color: options.eraserMode == EraserMode.pixel
+                  ? const Color(0xFF55B8B9)
+                  : Colors.black54,
+            ),
+            tooltip: 'Pixel eraser',
+            onPressed: () => optionsNotifier.state =
+                options.copyWith(eraserMode: EraserMode.pixel),
+          ),
+          const SizedBox(width: 10),
+          SizedBox(
+            width: 150,
+            child: Slider(
+              value: options.eraserSize, // Correct: eraserSize
+              activeColor: Colors.grey,
+              min: 5,
+              max: 50,
+              divisions: 9, // 50-5 = 45 / 9 = 5-unit steps
+              onChanged: (v) =>
+                  optionsNotifier.state = options.copyWith(eraserSize: v),
+            ),
+          ),
+          const SizedBox(width: 10),
+          SizedBox(
+            width: 30,
+            child: Text(
+              options.eraserSize.toStringAsFixed(0), // Correct: eraserSize
+              style: TextStyle(fontWeight: FontWeight.bold),
+              textAlign: TextAlign.center,
+            ),
+          ),
+        ],
+      );
+    }
+  }
 
-  SizedBox(
-   width: 150, // Added width for better control on desktop
-   child: Slider(
-   value: options.strokeWidth,
-   activeColor: Colors.blue,
-   min: 1,
-   max: 16,
-   divisions: 15,
-   onChanged: (v) =>
-    optionsNotifier.state = options.copyWith(strokeWidth: v),
-   ),
-  ),
-  const SizedBox(width: 10),
-
-  // Display the current width value
-  SizedBox(
-   width: 30,
-   child: Text(
-   options.strokeWidth.toStringAsFixed(0),
-   style: TextStyle(fontWeight: FontWeight.bold),
-   textAlign: TextAlign.center,
-   ),
-  ),
-  const SizedBox(width: 20),
-
-  if (![ToolType.eraser].contains(activeTool)) ...[
-   const Text("Color: "),
-   InkWell(
-   // onTap: () => _showColorPicker(context, ref, 'color'), // TODO: Implement color picker modal
-   child: Container(
-    width: 24,
-    height: 24,
-    decoration: BoxDecoration(
-    color: Color(
-     int.parse(options.color.replaceAll('#', '0xFF')),
-    ),
-    shape: BoxShape.circle,
-    border: Border.all(color: Colors.black26),
-    ),
-   ),
-   ),
-  ],
-
-  const SizedBox(width: 20),
-
-  if ([ToolType.rectangle, ToolType.circle].contains(activeTool)) ...[
-   const Text("Fill: "),
-   InkWell(
-   // onTap: () => _showColorPicker(context, ref, 'fillColor'), // TODO: Implement color picker modal
-   child: Container(
-    width: 24,
-    height: 24,
-    decoration: BoxDecoration(
-    color: Color(
-     int.parse(options.fillColor.replaceAll('#', '0xFF')),
-    ),
-    shape: BoxShape.circle,
-    border: Border.all(color: Colors.black26),
-    ),
-   ),
-   ),
-  ],
-  ],
- );
- }
-
- return const SizedBox.shrink();
+  // If tool is 'pan' or 'selection' (with no object selected), show nothing.
+  return const SizedBox.shrink();
 }
 
 Widget _buildSlideManager(WidgetRef ref, int currentSlideIndex) {
@@ -924,4 +1017,95 @@ Widget _buildGradientButton({
  ));
  }
 }
+// --- A modal for selecting eraser size on mobile ---
+void _showEraserSizeSelector(BuildContext context, WidgetRef ref) {
+  final provider = ref.read(toolOptionsProvider.notifier);
+  final options = provider.state;
 
+  // Define available eraser sizes (larger than strokes)
+  const List<double> sizes = [8.0, 12.0, 20.0, 30.0, 40.0, 50.0];
+
+  showModalBottomSheet(
+    context: context,
+    backgroundColor: Colors.transparent,
+    builder: (BuildContext bc) {
+      return Container(
+        padding: const EdgeInsets.all(16.0),
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Select Eraser Size', // Changed text
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+            ),
+            const Divider(),
+            SizedBox(
+              height: 50,
+              child: ListView(
+                scrollDirection: Axis.horizontal,
+                children: sizes.map((size) { // Use 'size'
+                  final isSelected = options.eraserSize == size; // Check eraserSize
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8.0),
+                    child: InkWell(
+                      onTap: () {
+                        provider.state = options.copyWith(eraserSize: size); // Set eraserSize
+                        Navigator.pop(bc); // Close the modal
+                      },
+                      child: Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Container(
+                              width: 30,
+                              height: 30,
+                              decoration: BoxDecoration(
+                                color: isSelected
+                                    ? const Color(0xFF55B8B9).withAlpha(54)
+                                    : Colors.transparent,
+                                shape: BoxShape.circle,
+                                border: isSelected
+                                    ? Border.all(
+                                        color: const Color(0xFF55B8B9),
+                                        width: 2,
+                                      )
+                                    : null,
+                              ),
+                              child: Center(
+                                child: Container(
+                                  width: size / 1.5, // Scale dot size
+                                  height: size / 1.5,
+                                  decoration: const BoxDecoration(
+                                    color: Colors.black,
+                                    shape: BoxShape.circle,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            if (isSelected)
+                              const Text(
+                                'Current',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  color: Color(0xFF55B8B9),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
+          ],
+        ),
+      );
+    },
+  );
+}

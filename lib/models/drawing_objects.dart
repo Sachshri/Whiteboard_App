@@ -88,7 +88,51 @@ class PointData {
     };
   }
 }
+// -- Eraser Object ---
+class EraserObject {
+  String id;
+  String type = 'eraser'; // IMPORTANT: New type
+  List<PointData> points;
+  double strokeWidth;
 
+  EraserObject({
+    required this.id,
+    required this.points,
+    required this.strokeWidth,
+  });
+
+  factory EraserObject.fromJson(Map<String, dynamic> json) {
+    return EraserObject(
+      id: json['id'] as String,
+      points: (json['points'] as List<dynamic>)
+          .map((p) => PointData.fromJson(p as Map<String, dynamic>))
+          .toList(),
+      strokeWidth: json['strokeWidth'] as double,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'type': type,
+      'points': points.map((p) => p.toJson()).toList(),
+      'strokeWidth': strokeWidth,
+    };
+  }
+  
+  // copyWith is useful for the updateDrawing logic
+  EraserObject copyWith({
+    String? id,
+    List<PointData>? points,
+    double? strokeWidth,
+  }) {
+    return EraserObject(
+      id: id ?? this.id,
+      points: points ?? this.points,
+      strokeWidth: strokeWidth ?? this.strokeWidth,
+    );
+  }
+}
 // --- Pen Object ---
 class PenObject {
   String id;

@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:white_boarding_app/models/white_board.dart';
 import 'package:white_boarding_app/view/white_board_screen.dart';
 import 'package:white_boarding_app/viewmodels/white_board_viewmodel.dart';
-import 'package:white_boarding_app/widgets/dialog_boxes.dart';
+import 'package:white_boarding_app/view/widgets/dialog_boxes.dart';
 import '../models/drawing_objects.dart';
 
 class HomeScreen extends ConsumerWidget {

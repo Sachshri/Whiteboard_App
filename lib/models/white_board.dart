@@ -3,7 +3,7 @@ import 'drawing_objects.dart';
 class Slide {
   String id;
   String background;
-  List<dynamic> objects; 
+  List<dynamic> objects;
 
   Slide({required this.id, this.background = 'White', this.objects = const []});
 
@@ -14,6 +14,8 @@ class Slide {
       final type = objJson['type'] as String;
       if (type == 'pen') {
         return PenObject.fromJson(objJson as Map<String, dynamic>);
+      } else if (type == "eraser") {
+        return EraserObject.fromJson(objJson as Map<String, dynamic>);
       } else {
         return DrawingObject.fromJson(objJson as Map<String, dynamic>);
       }
@@ -32,22 +34,21 @@ class Slide {
       'background': background,
       'Objects': objects.map((obj) {
         if (obj is PenObject) return obj.toJson();
+        if (obj is EraserObject) return obj.toJson();
         if (obj is DrawingObject) return obj.toJson();
-        return {}; 
+        return {};
       }).toList(),
     };
   }
-  Slide copyWith({
-        String? id,
-        String? background,
-        List<dynamic>? objects,
-    }) {
-        return Slide(
-            id: id ?? this.id,
-            background: background ?? this.background,
-            objects: objects ?? List<dynamic>.from(this.objects),
-        );
-    }
+
+  Slide copyWith({String? id, String? background, List<dynamic>? objects}) {
+    return Slide(
+      id: id ?? this.id,
+      background: background ?? this.background,
+      objects: objects ?? List<dynamic>.from(this.objects),
+      
+    );
+  }
 }
 
 class WhiteBoard {
