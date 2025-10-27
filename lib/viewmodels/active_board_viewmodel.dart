@@ -644,4 +644,59 @@ class ActiveBoardNotifier extends StateNotifier<WhiteBoardHistory> {
       // If we wanted to immediately start dragging, we'd need to adjust interaction flow.
     }
   }
+  // --- NEW PANNING LOGIC ---
+
+  /// Called by CanvasWidget when a pan drag starts with the Pan tool.
+  void startPan(Offset position) {
+    // We reuse the same _startPosition variable that drawing and selection use
+    _startPosition = position;
+  }
+
+  /// Called by CanvasWidget when the pan drag updates.
+  void updatePan(Offset position) {
+    if (_startPosition == null) return;
+
+    final delta = position - _startPosition!;
+
+    // No need to update if there's no movement
+    if (delta.distanceSquared == 0) return;
+
+    // Get a copy of all current objects
+    List<dynamic> updatedObjects = List.from(_currentSlide.objects);
+
+    // Iterate over *all* objects and apply the move
+    for (int i = 0; i < updatedObjects.length; i++) {
+      // We can reuse the same helper function from the selection logic!
+      updatedObjects[i] = _applyMove(updatedObjects[i], delta);
+    }
+
+    // Update the temporary drawing state (same as updateSelectionInteraction)
+    // This gives a live preview without polluting the undo stack on every frame.
+    final newSlide = _currentSlide.copyWith(objects: updatedObjects);
+    final newSlides = List<Slide>.from(_currentBoard.slides);
+    newSlides[_currentBoard.currentSlideIndex] = newSlide;
+
+    state = state.copyWith(
+      history: [
+        ...state.history.sublist(0, state.currentIndex),
+        _currentBoard.copyWith(slides: newSlides),
+      ],
+      currentIndex: state.currentIndex,
+    );
+
+    // Update the start position for the next frame's delta calculation
+    _startPosition = position;
+  }
+
+  /// Called by CanvasWidget when the pan drag ends.
+  void endPan() { 
+    if (_startPosition == null) return; // Pan was started but not updated
+
+    // The last temporary state applied in updatePan is now the
+    // "currentBoard". We commit this to history.
+    pushNewState(_currentBoard);
+
+    // Reset the start position
+    _startPosition = null;
+  }
 }

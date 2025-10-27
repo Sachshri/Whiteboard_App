@@ -100,14 +100,14 @@ class CanvasWidget extends ConsumerWidget {
         // Start drawing for creation tools
         activeBoardNotifier.startDrawing(position, toolOptions, activeTool);
       } else if (activeTool == ToolType.selection) {
-        // NEW: Start selection or manipulation, passing the key state
+        //Start selection or manipulation, passing the key state
         activeBoardNotifier.selectObjectAt(
           position,
           initialBoard,
           isShiftOrCtrl,
         );
       } else if (activeTool == ToolType.pan) {
-        // TODO: Implement pan start logic
+        activeBoardNotifier.startPan(position);
         debugPrint("Pan started at $position");
       }
     }
@@ -123,7 +123,7 @@ class CanvasWidget extends ConsumerWidget {
         //  Move or resize the selected object(s)
         activeBoardNotifier.updateSelectionInteraction(position);
       } else if (activeTool == ToolType.pan) {
-        // TODO: Implement pan update logic (move the canvas view/objects)
+        activeBoardNotifier.updatePan(position);
       }
     }
 
@@ -135,7 +135,7 @@ class CanvasWidget extends ConsumerWidget {
         // NEW: Commit move or resize to history
         activeBoardNotifier.commitSelectionInteraction();
       } else if (activeTool == ToolType.pan) {
-        // TODO: Implement pan end logic
+        activeBoardNotifier.endPan();
       }
     }
 
