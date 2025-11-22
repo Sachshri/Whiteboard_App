@@ -2,8 +2,8 @@ import 'dart:convert';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:white_boarding_app/models/white_board.dart';
 import 'package:uuid/uuid.dart';
+import 'package:white_boarding_app/models/whiteboard_models/white_board.dart';
 
 final whiteBoardListProvider =
     StateNotifierProvider<WhiteBoardListNotifier, List<WhiteBoard>>((ref) {

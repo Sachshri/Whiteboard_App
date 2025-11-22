@@ -1,5 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../models/ui_state.dart';
+import 'package:white_boarding_app/models/whiteboard_models/ui_state.dart';
 
 final toolStateProvider = StateNotifierProvider<ToolStateNotifier, ToolType>((ref) {
   return ToolStateNotifier();
