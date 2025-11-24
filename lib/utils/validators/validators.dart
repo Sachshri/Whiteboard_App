@@ -19,7 +19,7 @@ class Validators {
     //min password length
 
     if (value.length < 8) {
-      return "Password must be atleast 4 character long";
+      return "Password must be atleast 8 character long";
     }
     return null;
   }

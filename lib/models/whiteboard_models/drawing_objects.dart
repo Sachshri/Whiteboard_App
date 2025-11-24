@@ -1,3 +1,5 @@
+// lib/models/whiteboard_models/drawing_objects.dart
+
 class Attributes {
   double x;
   double y;
@@ -26,16 +28,18 @@ class Attributes {
 
   factory Attributes.fromJson(Map<String, dynamic> json) {
     return Attributes(
-      x: json['x'] as double,
-      y: json['y'] as double,
-      width: json['width'] as double? ?? 0.0,
-      height: json['height'] as double? ?? 0.0,
-      strokeWidth: json['strokeWidth'] as double? ?? 1.0,
+      // FIX: Use 'as num?' to allow nulls, then '?.' to call toDouble, then '??' for default
+      x: (json['x'] as num?)?.toDouble() ?? 0.0,
+      y: (json['y'] as num?)?.toDouble() ?? 0.0,
+      width: (json['width'] as num?)?.toDouble() ?? 0.0,
+      height: (json['height'] as num?)?.toDouble() ?? 0.0,
+      strokeWidth: (json['strokeWidth'] as num?)?.toDouble() ?? 1.0,
       strokeColor: json['strokeColor'] as String? ?? '#000000',
       fillColor: json['fillColor'] as String? ?? '#FFFFFF',
-      opacity: json['opacity'] as double? ?? 1.0,
-      text: json['text'] as String?, 
-      fontSize: json['fontSize'] as double? ?? 20.0, 
+      opacity: (json['opacity'] as num?)?.toDouble() ?? 1.0,
+      text: json['text'] as String? ?? json['value'] as String?, // Handle 'value' key from backend text objects
+      fontSize: (json['fontSize'] as num?)?.toDouble() ?? 
+                (json['fontWidth'] as num?)?.toDouble() ?? 20.0, // Handle 'fontWidth' from backend
     );
   }
 
@@ -90,8 +94,8 @@ class PointData {
 
   factory PointData.fromJson(Map<String, dynamic> json) {
     return PointData(
-      x: json['x'] as double,
-      y: json['y'] as double,
+      x: (json['x'] as num?)?.toDouble() ?? 0.0,
+      y: (json['y'] as num?)?.toDouble() ?? 0.0,
     );
   }
 
@@ -123,15 +127,29 @@ class PenObject {
   });
 
   factory PenObject.fromJson(Map<String, dynamic> json) {
+    final attributes = json['attributes'] as Map<String, dynamic>? ?? {};
+
+    // 2. Helper to get value from Root OR Attributes (Prioritize Attributes for DB data)
+    dynamic getValue(String key) {
+      return attributes[key] ?? json[key];
+    }
+
     return PenObject(
-      id: json['id'] as String,
-      points: (json['points'] as List<dynamic>)
+      id: json['id'] as String? ?? '', 
+      
+      // 3. Retrieve points correctly
+      points: ((getValue('points') ?? []) as List<dynamic>)
           .map((p) => PointData.fromJson(p as Map<String, dynamic>))
           .toList(),
-      strokeWidth: json['strokeWidth'] as double,
-      color: json['color'] as String,
-      opacity: json['opacity'] as double,
-      isEraser: json['isEraser'] as bool? ?? false, 
+      
+      // 4. Retrieve style properties correctly
+      strokeWidth: (getValue('strokeWidth') as num?)?.toDouble() ?? 3.0,
+      
+      // Handle color key variations (backend might save as 'color' or 'strokeColor')
+      color: getValue('color') ?? getValue('strokeColor') ?? '#000000',
+      
+      opacity: (getValue('opacity') as num?)?.toDouble() ?? 1.0,
+      isEraser: getValue('isEraser') as bool? ?? false,
     );
   }
 
@@ -179,9 +197,9 @@ class DrawingObject {
 
   factory DrawingObject.fromJson(Map<String, dynamic> json) {
     return DrawingObject(
-      id: json['id'] as String,
-      type: json['type'] as String,
-      attributes: Attributes.fromJson(json['attributes'] as Map<String, dynamic>),
+      id: json['id'] as String? ?? '',
+      type: json['type'] as String? ?? 'rectangle',
+      attributes: Attributes.fromJson(json['attributes'] as Map<String, dynamic>? ?? {}),
     );
   }
 

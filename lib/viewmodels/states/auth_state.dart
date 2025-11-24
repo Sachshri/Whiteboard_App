@@ -5,13 +5,13 @@ class AuthState {
   final AppUser? user;
   final bool isLoading;
   final String? errorMessage;
-  final bool isFirstRun; // To handle your specific first-time flow
+  // final bool isFirstRun; 
 
   AuthState({
     this.user,
     this.isLoading = false,
     this.errorMessage,
-    this.isFirstRun = true,
+    // this.isFirstRun = true,
   });
 
   bool get isAuthenticated => user != null;
@@ -20,13 +20,13 @@ class AuthState {
     AppUser? user,
     bool? isLoading,
     String? errorMessage,
-    bool? isFirstRun,
+    // bool? isFirstRun,
   }) {
     return AuthState(
       user: user ?? this.user,
       isLoading: isLoading ?? this.isLoading,
-      errorMessage: errorMessage, // Reset error if not provided
-      isFirstRun: isFirstRun ?? this.isFirstRun,
+       errorMessage: this.errorMessage??errorMessage,
+      // isFirstRun: isFirstRun ?? this.isFirstRun,
     );
   }
 }

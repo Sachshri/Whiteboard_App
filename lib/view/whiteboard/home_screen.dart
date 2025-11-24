@@ -4,6 +4,7 @@ import 'package:white_boarding_app/models/whiteboard_models/drawing_objects.dart
 import 'package:white_boarding_app/models/whiteboard_models/white_board.dart';
 import 'package:white_boarding_app/view/authentication/auth_screen.dart';
 import 'package:white_boarding_app/view/whiteboard/white_board_screen.dart';
+import 'package:white_boarding_app/view/whiteboard/widgets/board_selection_dialog.dart';
 import 'package:white_boarding_app/viewmodels/auth_viewmodel.dart';
 import 'package:white_boarding_app/viewmodels/white_board_viewmodel.dart';
 import 'package:white_boarding_app/utils/helpers/dialog_boxes.dart';
@@ -16,7 +17,7 @@ class HomeScreen extends ConsumerWidget {
     final size = MediaQuery.of(context).size;
     // logic to determine layout type
     final bool isDesktop = size.width > 910;
-    
+
     return Scaffold(
       extendBodyBehindAppBar: true,
       appBar: const HomeAppBar(),
@@ -45,7 +46,7 @@ class _HomeScreenContent extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final whiteBoards = ref.watch(whiteBoardListProvider);
-    
+
     // Responsive Grid Calculations
     final size = MediaQuery.of(context).size;
     final crossAxisCount = isDesktop ? 5 : (size.width > 600 ? 3 : 2);
@@ -60,10 +61,8 @@ class _HomeScreenContent extends ConsumerWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (isDesktop) 
-            const DesktopActionRow(),
-          if (!isDesktop) 
-            const MobileActionRow(),
+          if (isDesktop) const DesktopActionRow(),
+          if (!isDesktop) const MobileActionRow(),
 
           if (!isDesktop) const SizedBox(height: 15),
 
@@ -111,7 +110,6 @@ class HomeAppBar extends ConsumerWidget implements PreferredSizeWidget {
     // Watch auth state
     final authState = ref.watch(authProvider);
     final authNotifier = ref.read(authProvider.notifier);
-
     return AppBar(
       backgroundColor: Colors.transparent,
       automaticallyImplyLeading: false,
@@ -122,47 +120,121 @@ class HomeAppBar extends ConsumerWidget implements PreferredSizeWidget {
         style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
       ),
       actions: [
+        if (authState.isAuthenticated && authState.user!.name != "Guest")
+          Container(
+            margin: const EdgeInsets.symmetric(horizontal: 8),
+            child: IconButton(
+              icon: const Icon(Icons.sync, color: Color(0xFF55B8B9)),
+              tooltip: 'Sync Now',
+              onPressed: () async {
+                // Visual feedback for manual press
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text("Syncing with cloud..."),
+                    duration: Duration(seconds: 1),
+                  ),
+                );
+
+                try {
+                  // Access the notifier and call sync
+                  await ref
+                      .read(whiteBoardListProvider.notifier)
+                      .syncWithBackend();
+
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text("Sync Complete!")),
+                    );
+                  }
+                } catch (e) {
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(
+                          "Sync Failed: ${e.toString().split(':').last}",
+                        ),
+                      ),
+                    );
+                  }
+                }
+              },
+            ),
+          ),
         if (authState.isLoading)
-           const Center(child: Padding(
-             padding: EdgeInsets.only(right: 16.0),
-             child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)),
-           )),
-        
-        // IF LOGGED IN: Show Profile Icon
+          const Center(
+            child: Padding(
+              padding: EdgeInsets.only(right: 16.0),
+              child: SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            ),
+          ),
+
         if (!authState.isLoading && authState.isAuthenticated) ...[
-          Center(child: Text("Hi, ${authState.user?.name}", style: TextStyle(color: Colors.black))),
+          Center(
+            child: Text(
+              "Hi, ${authState.user?.name}",
+              style: TextStyle(color: Colors.black),
+            ),
+          ),
           const SizedBox(width: 10),
           PopupMenuButton<String>(
-            icon: const Icon(Icons.account_circle, size: 32, color: Color(0xFF55B8B9)),
-            onSelected: (value) {
+            icon: const Icon(
+              Icons.account_circle,
+              size: 32,
+              color: Color(0xFF55B8B9),
+            ),
+            onSelected: (value) async {
               if (value == 'logout') {
-                authNotifier.logout();
+                if (authState.user!.name != "Guest") {
+                  await authNotifier.logout();
+                }
+                if (context.mounted) {
+                  Navigator.of(
+                    context,
+                  ).push(MaterialPageRoute(builder: (_) => const AuthScreen()));
+                }
               }
             },
             itemBuilder: (BuildContext context) {
               return [
-                const PopupMenuItem(
-                  value: 'logout',
-                  child: Row(children: [Icon(Icons.logout), SizedBox(width:8), Text('Logout')]),
+                PopupMenuItem(
+                  value: "logout",
+                  child: Row(
+                    children: [
+                      !(authState.user?.name == "Guest")
+                          ? Icon(Icons.logout)
+                          : Icon(Icons.add),
+                      SizedBox(width: 8),
+                      Text(
+                        !(authState.user?.name == "Guest")
+                            ? 'Logout'
+                            : "Sign up / Sign in",
+                      ),
+                    ],
+                  ),
                 ),
               ];
             },
           ),
         ],
 
-        // IF LOGGED OUT: Show Sign Up / Sign In Button
-        if (!authState.isLoading && !authState.isAuthenticated)
-          GradientButton(
-            onPressed: () {
-               // Navigate to your AuthScreen (Login/Signup)
-               Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AuthScreen()));
-            },
-            label: "Sign In",
-            icon: Icons.login,
-            gradient: const LinearGradient(
-              colors: [Color(0xFF86DAB9), Color(0xFF55B8B9)],
-            ),
-          ),
+        // if (!authState.isLoading && !authState.isAuthenticated)
+        //   GradientButton(
+        //     onPressed: () {
+        //         Navigator.of(context).pushAndRemoveUntil(
+        //             MaterialPageRoute(builder: (_) => const AuthScreen()),
+        //             (Route<dynamic> route) => false,
+        //           );
+        //     },
+        //     label: "Sign Up/Sign In",
+        //     icon: Icons.login,
+        //     gradient: const LinearGradient(
+        //       colors: [Color(0xFF86DAB9), Color(0xFF55B8B9)],
+        //     ),
+        //   ),
         const SizedBox(width: 16),
       ],
     );
@@ -178,8 +250,9 @@ class MobileActionRow extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final notifier = ref.read(whiteBoardListProvider.notifier);
-    
-    return SizedBox( // Used SizedBox instead of PreferredSize as it's inside a body Column
+
+    return SizedBox(
+      // Used SizedBox instead of PreferredSize as it's inside a body Column
       height: 60.0,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
@@ -193,7 +266,8 @@ class MobileActionRow extends ConsumerWidget {
                   );
                   Navigator.of(context).push(
                     MaterialPageRoute(
-                      builder: (context) => WhiteBoardScreen(whiteBoard: whiteBoard),
+                      builder: (context) =>
+                          WhiteBoardScreen(whiteBoard: whiteBoard),
                     ),
                   );
                 },
@@ -207,7 +281,12 @@ class MobileActionRow extends ConsumerWidget {
             const SizedBox(width: 10),
             Expanded(
               child: GradientButton(
-                onPressed: () => debugPrint('Collaborate tapped'),
+                onPressed: () {
+                  showDialog(
+                    context: context,
+                    builder: (context) => const BoardSelectionDialog(),
+                  );
+                },
                 label: 'Collaborate',
                 icon: Icons.group,
                 gradient: const LinearGradient(
@@ -240,7 +319,8 @@ class DesktopActionRow extends ConsumerWidget {
               );
               Navigator.of(context).push(
                 MaterialPageRoute(
-                  builder: (context) => WhiteBoardScreen(whiteBoard: whiteBoard),
+                  builder: (context) =>
+                      WhiteBoardScreen(whiteBoard: whiteBoard),
                 ),
               );
             },
@@ -252,7 +332,12 @@ class DesktopActionRow extends ConsumerWidget {
           ),
           const SizedBox(width: 15),
           GradientButton(
-            onPressed: () => debugPrint('Collaborate tapped'),
+            onPressed: () {
+    showDialog(
+      context: context,
+      builder: (context) => const BoardSelectionDialog(),
+    );
+  },
             label: 'Collaborate',
             icon: Icons.group,
             gradient: const LinearGradient(
@@ -290,7 +375,8 @@ class WhiteBoardCard extends ConsumerWidget {
             ),
           );
         },
-        onDoubleTap: () => DialogBoxes.showTitleEditDialog(context, ref, whiteBoard, false),
+        onDoubleTap: () =>
+            DialogBoxes.showBoardOptionsDialog(context, ref, whiteBoard, false),
         child: Container(
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
@@ -352,7 +438,9 @@ class WhiteBoardThumbnail extends StatelessWidget {
     IconData icon;
     if (whiteBoard.slides.first.objects.any((obj) => obj is PenObject)) {
       icon = Icons.brush_rounded;
-    } else if (whiteBoard.slides.first.objects.any((obj) => obj.type == 'text')) {
+    } else if (whiteBoard.slides.first.objects.any(
+      (obj) => obj.type == 'text',
+    )) {
       icon = Icons.text_fields;
     } else {
       icon = Icons.wb_incandescent;

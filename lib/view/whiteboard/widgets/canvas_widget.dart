@@ -3,18 +3,38 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:white_boarding_app/models/whiteboard_models/drawing_objects.dart';
-import 'package:white_boarding_app/models/whiteboard_models/ui_state.dart';
+import 'package:white_boarding_app/view/whiteboard/widgets/cursor_widget.dart';
+import 'package:white_boarding_app/viewmodels/states/whiteboard_ui_state.dart';
 import 'package:white_boarding_app/models/whiteboard_models/white_board.dart';
 import 'package:white_boarding_app/view/whiteboard/white_board_screen.dart';
 import 'package:white_boarding_app/viewmodels/active_board_viewmodel.dart';
 import '../../../viewmodels/tool_viewmodel.dart';
 
-class CanvasWidget extends ConsumerWidget {
+class CanvasWidget extends ConsumerStatefulWidget {
   final WhiteBoard whiteBoard;
   const CanvasWidget({super.key, required this.whiteBoard});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<CanvasWidget> createState() => _CanvasWidgetState();
+}
+
+class _CanvasWidgetState extends ConsumerState<CanvasWidget> {
+  // 1. Initialize FocusNode here, exactly ONCE
+  late FocusNode focusNode;
+  @override
+  void initState() {
+    super.initState();
+    focusNode = FocusNode(debugLabel: 'Canvas Focus');
+  }
+
+  @override
+  void dispose() {
+    // 2. Dispose it when the widget is destroyed
+    focusNode.dispose();
+    super.dispose();
+  }
+  @override
+  Widget build(BuildContext context) {
     final initialBoard = (context.findAncestorWidgetOfExactType<WhiteBoardScreen>() as WhiteBoardScreen).whiteBoard;
     final activeTool = ref.watch(toolStateProvider);
     final history = ref.watch(activeBoardHistoryProvider(initialBoard));
@@ -25,7 +45,7 @@ class CanvasWidget extends ConsumerWidget {
     final isShiftOrCtrl = ref.watch(isShiftControlPressedProvider);
     final toolOptions = ref.watch(toolOptionsProvider);
     final currentDrawingObject = ref.watch(currentDrawingObjectProvider);
-
+    final remoteCursors = ref.watch(remoteCursorsProvider(initialBoard.id));
     
     final FocusNode focusNode = FocusNode(debugLabel: 'Canvas Focus');
 
@@ -76,7 +96,10 @@ class CanvasWidget extends ConsumerWidget {
         }
       }
     }
-
+  void handleHover(PointerEvent event) {
+        // Handle mouse hover for cursor broadcasting even when not dragging
+        activeBoardNotifier.sendCursorMove(event.localPosition);
+    }
     void handlePanStart(Offset position) {
       if ([
         ToolType.pencil,
@@ -126,6 +149,7 @@ class CanvasWidget extends ConsumerWidget {
       } else if (activeTool == ToolType.pan) {
         activeBoardNotifier.updatePan(position);
       }
+      activeBoardNotifier.sendCursorMove(position);
     }
 
     void handlePanEnd(DragEndDetails details) {
@@ -153,46 +177,54 @@ class CanvasWidget extends ConsumerWidget {
        
           return Padding(
             padding: const EdgeInsets.all(10),
-            child: GestureDetector(
-              onPanStart: (details) {
-                focusNode.requestFocus();
-                handlePanStart(details.localPosition);
-              },
-              onPanUpdate: (details) {
-                final clampedPos = Offset(
-                  details.localPosition.dx.clamp(0.0, constraints.maxWidth),
-                  details.localPosition.dy.clamp(0.0, constraints.maxHeight),
-                );
-                handlePanUpdate(clampedPos);
-              },
-              onPanEnd: handlePanEnd,
-              onTapDown: (details) {
-                if (activeTool == ToolType.selection) {
-                  activeBoardNotifier.selectObjectAt(
-                    details.localPosition,
-                    initialBoard,
-                    isShiftOrCtrl,
+            child: MouseRegion(
+              child: GestureDetector(
+                onPanStart: (details) {
+                  focusNode.requestFocus();
+                  handlePanStart(details.localPosition);
+                },
+                onPanUpdate: (details) {
+                  final clampedPos = Offset(
+                    details.localPosition.dx.clamp(0.0, constraints.maxWidth),
+                    details.localPosition.dy.clamp(0.0, constraints.maxHeight),
                   );
-                }
-              },
-              onDoubleTapDown: (details) => handleDoubleTap(details.localPosition),
-              child: Container(
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: Colors.black12),
-                ),
-                child: ClipRect(
-                  child: CustomPaint(
-                    painter: WhiteBoardPainter(
-                      whiteBoard: activeBoard,
-                      currentDrawingObject: currentDrawingObject,
-                      selectedObjectIds: selectedIds,
-                      selectionMode: selectionMode,
-                      activeBoardNotifier: activeBoardNotifier,
+                  handlePanUpdate(clampedPos);
+                },
+                onPanEnd: handlePanEnd,
+                onTapDown: (details) {
+                  if (activeTool == ToolType.selection) {
+                    activeBoardNotifier.selectObjectAt(
+                      details.localPosition,
+                      initialBoard,
+                      isShiftOrCtrl,
+                    );
+                  }
+                },
+                onDoubleTapDown: (details) => handleDoubleTap(details.localPosition),
+                child: Stack(
+                  children: [Container(
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: Colors.black12),
                     ),
-                    child: const SizedBox.expand(),
+                    child: ClipRect(
+                      child: CustomPaint(
+                        painter: WhiteBoardPainter(
+                          whiteBoard: activeBoard,
+                          currentDrawingObject: currentDrawingObject,
+                          selectedObjectIds: selectedIds,
+                          selectionMode: selectionMode,
+                          activeBoardNotifier: activeBoardNotifier,
+                        ),
+                        child: const SizedBox.expand(),
+                      ),
+                    ),
                   ),
+                  IgnorePointer( // Ensure cursors don't block interaction
+                       child: RemoteCursorsWidget(cursors: remoteCursors),
+                     ),
+                  ],
                 ),
               ),
             ),

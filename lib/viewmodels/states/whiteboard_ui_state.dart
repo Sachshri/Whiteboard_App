@@ -12,16 +12,16 @@ enum ToolType {
   arrow,
   line,
   text,
-  image,
+  // image,
 }
 
 enum SelectionMode {
   none,
   moving,
-  resizingTl, // Top-Left handle
-  resizingTr, // Top-Right handle
-  resizingBl, // Bottom-Left handle
-  resizingBr, // Bottom-Right handle
+  resizingTl, 
+  resizingTr, 
+  resizingBl,
+  resizingBr, 
 }
 enum EraserMode {
   pixel, 

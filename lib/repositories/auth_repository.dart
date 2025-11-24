@@ -1,28 +1,23 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'package:flutter/foundation.dart'; // for kIsWeb
+import 'package:flutter/foundation.dart'; 
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
-import 'package:jwt_decoder/jwt_decoder.dart'; // IMPORT THIS
+import 'package:jwt_decoder/jwt_decoder.dart'; 
 import 'package:white_boarding_app/models/auth_model/app_user.dart';
 import 'package:white_boarding_app/utils/helpers/app_helper.dart';
 
 class AuthRepository {
-  // 10.0.2.2 for Android Emulator, localhost for iOS/Web
   String get baseUrl {
     if (kIsWeb) return 'http://localhost:80';
-    if (Platform.isAndroid) return 'http://10.0.2.2:80'; 
+    if (Platform.isAndroid) return 'http://10.0.2.2:80';
     return 'http://localhost:80';
   }
 
   final FlutterSecureStorage _storage = const FlutterSecureStorage();
   static const _authTokenKey = 'auth_token';
   static const _authUserKey = 'auth_user_data';
-
-  // ---------------------------------------------------------------------------
-  // 1. LOAD SESSION
-  // ---------------------------------------------------------------------------
   Future<AppUser?> getCurrentUser() async {
     try {
       final token = await _storage.read(key: _authTokenKey);
@@ -30,8 +25,6 @@ class AuthRepository {
         await logout();
         return null;
       }
-      
-      // We reconstruct the user from the Token Claims
       return _userFromToken(token);
     } catch (e) {
       await logout();
@@ -39,44 +32,27 @@ class AuthRepository {
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // 2. LOGIN
-  // Backend: POST /auth/login
-  // Request: JSON { "email": "...", "password": "..." }
-  // Response: JSON { "access_token": "..." }
-  // ---------------------------------------------------------------------------
   Future<AppUser> login(String email, String password) async {
     try {
       final uri = Uri.parse('$baseUrl/auth/login');
-      
       debugPrint("POST Login: $uri");
-
       final response = await http.post(
         uri,
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'email': email, 
-          'password': password
-        }),
+        body: jsonEncode({'email': email, 'password': password}),
       );
-
       debugPrint("Login Response Code: ${response.statusCode}");
       debugPrint("Login Response Body: ${response.body}");
-
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        // Backend Key is "access_token"
         final String token = data['access_token'] ?? '';
-        
         if (token.isEmpty) throw Exception("No access_token received");
-
-        // Extract User details from the Token itself
         final user = _userFromToken(token);
-
-        // Save Session
         await _storage.write(key: _authTokenKey, value: token);
-        await _storage.write(key: _authUserKey, value: jsonEncode(user.toJson()));
-
+        await _storage.write(
+          key: _authUserKey,
+          value: jsonEncode(user.toJson()),
+        );
         return user;
       } else {
         throw _parseHttpError(response);
@@ -85,38 +61,32 @@ class AuthRepository {
       throw Exception(_cleanError(e));
     }
   }
-
-  // ---------------------------------------------------------------------------
-  // 3. REGISTER
-  // Backend: POST /auth/register
-  // Request: JSON { ... }
-  // Response: PLAIN TEXT "User ID: <hex>" (NOT JSON!)
-  // ---------------------------------------------------------------------------
-  Future<AppUser> register(String username, String email, String password) async {
+  Future<AppUser> register(
+    String username,
+    String email,
+    String password,
+  ) async {
     try {
       final uri = Uri.parse('$baseUrl/auth/register');
-
       debugPrint("POST Register: $uri");
-
       final response = await http.post(
         uri,
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'username': username,
           'email': email,
-          'password': password
+          'password': password,
         }),
       );
-      
       debugPrint("Register Response Code: ${response.statusCode}");
       debugPrint("Register Response Body: ${response.body}");
 
       if (response.statusCode == 200 || response.statusCode == 201) {
         return AppUser(
-          id: 'temp_id', 
-          name: username, 
-          email: email, 
-          token: null 
+          id: 'temp_id',
+          name: username,
+          email: email,
+          token: null,
         );
       } else {
         throw _parseHttpError(response);
@@ -124,17 +94,11 @@ class AuthRepository {
     } catch (e) {
       throw _cleanError(e);
     }
-  }
-
-  // ---------------------------------------------------------------------------
-  // 4. LOGOUT
-  // ---------------------------------------------------------------------------
+  } 
   Future<void> logout() async {
     await _storage.delete(key: _authTokenKey);
     await _storage.delete(key: _authUserKey);
-  }
-
-// ---------------User From Token---------------
+  } 
   AppUser _userFromToken(String token) {
     try {
       Map<String, dynamic> decodedToken = JwtDecoder.decode(token);
@@ -148,11 +112,9 @@ class AuthRepository {
       throw AppFailure("Invalid Token Data");
     }
   }
-
-  // Parses backend errors specifically for Go's http.Error format
   AppFailure _parseHttpError(http.Response response) {
     try {
-      // Try to parse JSON error: {"error": "message"}
+      
       final data = jsonDecode(response.body);
       if (data is Map && data.containsKey('error')) {
         return AppFailure(data['error']);
@@ -160,20 +122,26 @@ class AuthRepository {
       if (data is Map && data.containsKey('message')) {
         return AppFailure(data['message']);
       }
-    } catch (_) {}
-
-    // Fallback based on status codes
+    } catch (_) {} 
     switch (response.statusCode) {
-      case 400: return AppFailure("Invalid request. Please check your inputs.");
-      case 401: return AppFailure("Incorrect credentials.");
-      case 403: return AppFailure("You do not have permission to perform this action.");
-      case 404: return AppFailure("Server resource not found.");
-      case 409: return AppFailure("User already exists.");
-      case 500: return AppFailure("Internal Server Error. Please try again later.");
-      default: return AppFailure("Unknown error occurred (Code: ${response.statusCode})");
+      case 400:
+        return AppFailure("Invalid request. Please check your inputs.");
+      case 401:
+        return AppFailure("Incorrect credentials.");
+      case 403:
+        return AppFailure("You do not have permission to perform this action.");
+      case 404:
+        return AppFailure("Invalid Credentials or Resources not found.");
+      case 409:
+        return AppFailure("User already exists.");
+      case 500:
+        return AppFailure("Internal Server Error. Please try again later.");
+      default:
+        return AppFailure(
+          "Unknown error occurred (Code: ${response.statusCode})",
+        );
     }
   }
-
   AppFailure _cleanError(dynamic e) {
     if (e is AppFailure) return e;
     if (e is SocketException) return AppFailure("No Internet Connection.");

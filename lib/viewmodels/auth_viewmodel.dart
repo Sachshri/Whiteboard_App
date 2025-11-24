@@ -42,27 +42,62 @@ class AuthNotifier extends StateNotifier<AuthState> {
   }
 
   Future<void> login(String email, String password) async {
-    if (!await _hasInternetConnection()) return;
+    debugPrint("// \nChecking Internet Connection");
+    if (!await _hasInternetConnection()) {
+      state = state.copyWith(
+        isLoading: false,
+        errorMessage: "No Internet Connection",
+      );
+      debugPrint("STATE AFTER NO INTERNET: $state");
+      return;
+    }
+
+    // Clear any previous errors and set loading
     state = state.copyWith(isLoading: true, errorMessage: null);
+    debugPrint("STATE AFTER SETTING LOADING: $state");
+
     try {
+      debugPrint("\ncalling repository login function");
       final user = await _repository.login(email, password);
+
       state = state.copyWith(isLoading: false, user: user, errorMessage: null);
+      debugPrint("STATE AFTER SUCCESS: $state");
     } catch (e) {
-      state = state.copyWith(isLoading: false, errorMessage: e.toString());
-      debugPrint("Error::\n\n\n\n ${e.toString()}");
+      debugPrint("\nCATCHING ERROR: ${e.toString()}");
+
+      // CRITICAL: Create a completely new state object
+      state = AuthState(
+        user: state.user,
+        isLoading: false,
+        errorMessage: e.toString(),
+      );
+
+      debugPrint("STATE AFTER ERROR: $state");
     }
   }
 
+  // Updated clearError method
+  void clearError() {
+    state = state.copyWith(errorMessage: null);
+    debugPrint("STATE AFTER CLEAR ERROR: $state");
+  }
+
   Future<void> register(String username, String email, String password) async {
-    if (!await _hasInternetConnection()) return;
+    if (!await _hasInternetConnection()) {
+      state = state.copyWith(
+        isLoading: false,
+        errorMessage: "No Internet Connection",
+      );
+      return;
+    }
     state = state.copyWith(isLoading: true, errorMessage: null);
     try {
       await _repository.register(username, email, password);
       state = state.copyWith(isLoading: false, errorMessage: null);
     } catch (e) {
-      final cleanMessage = e.toString();
-      debugPrint("Register Error: $cleanMessage");
-      state = state.copyWith(isLoading: false, errorMessage: cleanMessage);
+      final cleanerrorMessage = e.toString();
+      debugPrint("Register Error: $cleanerrorMessage");
+      state = state.copyWith(isLoading: false, errorMessage: cleanerrorMessage);
     }
   }
 
@@ -80,10 +115,5 @@ class AuthNotifier extends StateNotifier<AuthState> {
   Future<void> logout() async {
     await _repository.logout();
     state = state.copyWith(user: null);
-  }
-
-  // Helper to clear error manually if needed by UI
-  void clearError() {
-    state = state.copyWith(errorMessage: null);
   }
 }

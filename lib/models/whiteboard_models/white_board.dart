@@ -8,21 +8,28 @@ class Slide {
   Slide({required this.id, this.background = 'White', this.objects = const []});
 
   factory Slide.fromJson(Map<String, dynamic> json) {
-    List<dynamic> parsedObjects = (json['Objects'] as List<dynamic>).map((
-      objJson,
-    ) {
-      final type = objJson['type'] as String;
+    var rawObjects = json['objects'];
+  if (rawObjects == null || rawObjects is! List) {
+    rawObjects = [];
+  }
+        List<dynamic> parsedObjects = (rawObjects).map((objJson) {
+      // Ensure objJson is cast correctly
+      final map = objJson as Map<String, dynamic>; 
+      final type = map['type'] as String?;
+      
+      if (type == null) return null;
+      
       if (type == 'pen') {
-        return PenObject.fromJson(objJson as Map<String, dynamic>);
+        return PenObject.fromJson(map);
       } else if (type == "eraser") {
-        return null; 
+        return null;
       } else {
-        return DrawingObject.fromJson(objJson as Map<String, dynamic>);
+        return DrawingObject.fromJson(map);
       }
-    }).where((element) => element != null).toList(); // Filter out nulls
-
+    }).where((element) => element != null).toList();
+    
     return Slide(
-      id: json['Id'] as String,
+      id: json['id']?.toString() ?? json['_id']?.toString() ?? DateTime.now().millisecondsSinceEpoch.toString(),
       background: json['background'] as String? ?? 'White',
       objects: parsedObjects,
     );
@@ -34,7 +41,6 @@ class Slide {
       'background': background,
       'Objects': objects.map((obj) {
         if (obj is PenObject) return obj.toJson();
-        // No EraserObject to serialize
         if (obj is DrawingObject) return obj.toJson();
         return {};
       }).toList(),
@@ -50,12 +56,17 @@ class Slide {
   }
 }
 
+// lib/models/whiteboard_models/white_board.dart
+
 class WhiteBoard {
   String id;
   String title;
   String creationDate;
   List<Slide> slides;
   int currentSlideIndex;
+  
+  // New flag to track if this board is saved to the backend
+  bool isSynced; 
 
   WhiteBoard({
     required this.id,
@@ -63,17 +74,26 @@ class WhiteBoard {
     required this.creationDate,
     this.slides = const [],
     this.currentSlideIndex = 0,
+    this.isSynced = false, // Default to false for offline creation
   });
 
   factory WhiteBoard.fromJson(Map<String, dynamic> json) {
+    // Backend sends '_id', Local storage might send 'id'
+    String idVal = json['_id'] ?? json['id'] ?? '';
+    
     return WhiteBoard(
-      id: json['id'] as String,
-      title: json['title'] as String,
-      creationDate: json['creationDate'] as String,
-      slides: (json['slides'] as List<dynamic>)
-          .map((s) => Slide.fromJson(s as Map<String, dynamic>))
-          .toList(),
+      id: idVal,
+      title: json['title'] ?? 'Untitled',
+      creationDate: json['creationDate'] ?? '',
+      slides: json['slides'] != null 
+          ? (json['slides'] as List<dynamic>)
+              .map((s) => Slide.fromJson(s as Map<String, dynamic>))
+              .toList()
+          : [],
       currentSlideIndex: json['currentSlideIndex'] as int? ?? 0,
+      // If it comes from backend (has _id), it is synced. 
+      // If loaded from local storage, use the stored value.
+      isSynced: json.containsKey('_id') ? true : (json['isSynced'] ?? false),
     );
   }
 
@@ -84,6 +104,7 @@ class WhiteBoard {
       'creationDate': creationDate,
       'slides': slides.map((s) => s.toJson()).toList(),
       'currentSlideIndex': currentSlideIndex,
+      'isSynced': isSynced,
     };
   }
 
@@ -93,6 +114,7 @@ class WhiteBoard {
     String? creationDate,
     List<Slide>? slides,
     int? currentSlideIndex,
+    bool? isSynced,
   }) {
     return WhiteBoard(
       id: id ?? this.id,
@@ -100,6 +122,7 @@ class WhiteBoard {
       creationDate: creationDate ?? this.creationDate,
       slides: slides ?? List<Slide>.from(this.slides),
       currentSlideIndex: currentSlideIndex ?? this.currentSlideIndex,
+      isSynced: isSynced ?? this.isSynced,
     );
   }
 }

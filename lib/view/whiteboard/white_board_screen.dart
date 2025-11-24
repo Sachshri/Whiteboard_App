@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:white_boarding_app/models/whiteboard_models/ui_state.dart';
+import 'package:white_boarding_app/view/whiteboard/widgets/share_board_dialog.dart';
+import 'package:white_boarding_app/viewmodels/states/whiteboard_ui_state.dart';
 import 'package:white_boarding_app/models/whiteboard_models/white_board.dart';
 import 'package:white_boarding_app/utils/helpers/helpers.dart';
 import 'package:white_boarding_app/viewmodels/white_board_viewmodel.dart';
@@ -8,6 +9,7 @@ import 'package:white_boarding_app/utils/helpers/dialog_boxes.dart';
 import 'package:white_boarding_app/view/whiteboard/widgets/slide_thumbnail_canvas.dart';
 import '../../viewmodels/tool_viewmodel.dart';
 import '../../viewmodels/active_board_viewmodel.dart';
+import '../../viewmodels/auth_viewmodel.dart'; 
 import 'widgets/canvas_widget.dart';
 
 final slideManagerVisibleProvider = StateProvider<bool>((ref) => true);
@@ -20,7 +22,12 @@ class WhiteBoardScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     return ProviderScope(
       overrides: [
-        activeBoardHistoryProvider(whiteBoard).overrideWith((ref) => ActiveBoardNotifier(whiteBoard, ref)),
+        // FIX: Inject WebSocketService and AuthState into the notifier
+        activeBoardHistoryProvider(whiteBoard).overrideWith((ref) {
+          final wsService = ref.read(webSocketServiceProvider);
+          final authState = ref.read(authProvider);
+          return ActiveBoardNotifier(whiteBoard, ref, wsService, authState);
+        }),
       ],
       child: _WhiteBoardScreenContent(whiteBoard: whiteBoard),
     );
@@ -49,20 +56,25 @@ class _WhiteBoardScreenContent extends ConsumerWidget {
           onPressed: () => Navigator.pop(context),
         ),
         title: GestureDetector(
-          onDoubleTap: () => DialogBoxes.showTitleEditDialog(
+          onDoubleTap: () => DialogBoxes.showBoardOptionsDialog(
             context,
             ref,
             activeBoard,
             true,
-            localNotifier: ref.read(activeBoardHistoryProvider(whiteBoard).notifier),
+            localNotifier:
+                ref.read(activeBoardHistoryProvider(whiteBoard).notifier),
           ),
           child: Text(
             activeBoard.title,
-            style: const TextStyle(color: Colors.black87, fontWeight: FontWeight.bold, fontSize: 16),
+            style: const TextStyle(
+                color: Colors.black87,
+                fontWeight: FontWeight.bold,
+                fontSize: 16),
           ),
         ),
         actions: [
-          _AppBarActions(whiteBoard: whiteBoard, isDesktopOrTablet: isDesktop || isTablet)
+          _AppBarActions(
+              whiteBoard: whiteBoard, isDesktopOrTablet: isDesktop || isTablet)
         ],
       ),
       body: Container(
@@ -75,7 +87,9 @@ class _WhiteBoardScreenContent extends ConsumerWidget {
         ),
         child: isMobile
             ? MobileLayout(whiteBoard: whiteBoard)
-            : DesktopTabletLayout(whiteBoard: whiteBoard, isSlideManagerVisible: ref.watch(slideManagerVisibleProvider)),
+            : DesktopTabletLayout(
+                whiteBoard: whiteBoard,
+                isSlideManagerVisible: ref.watch(slideManagerVisibleProvider)),
       ),
     );
   }
@@ -95,7 +109,8 @@ class DesktopTabletLayout extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final activeBoard = ref.watch(activeBoardHistoryProvider(whiteBoard)).currentBoard;
+    final activeBoard =
+        ref.watch(activeBoardHistoryProvider(whiteBoard)).currentBoard;
     final activeTool = ref.watch(toolStateProvider);
 
     return Column(
@@ -131,7 +146,8 @@ class MobileLayout extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final activeBoard = ref.watch(activeBoardHistoryProvider(whiteBoard)).currentBoard;
+    final activeBoard =
+        ref.watch(activeBoardHistoryProvider(whiteBoard)).currentBoard;
     final activeTool = ref.watch(toolStateProvider);
 
     return Stack(
@@ -159,35 +175,104 @@ class _AppBarActions extends ConsumerWidget {
   final WhiteBoard whiteBoard;
   final bool isDesktopOrTablet;
 
-  const _AppBarActions({required this.whiteBoard, required this.isDesktopOrTablet});
+  const _AppBarActions(
+      {required this.whiteBoard, required this.isDesktopOrTablet});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final history = ref.watch(activeBoardHistoryProvider(whiteBoard));
     final notifier = ref.read(activeBoardHistoryProvider(whiteBoard).notifier);
-
+    final activeBoard = history.currentBoard;
+    final authState = ref.watch(authProvider);
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
+         if (authState.isAuthenticated && authState.user!.name != "Guest")
+          Container(
+            margin: const EdgeInsets.symmetric(horizontal: 8),
+            child: IconButton(
+              icon: const Icon(Icons.sync, color: Color(0xFF55B8B9)),
+              tooltip: 'Sync Now',
+              onPressed: () async {
+                // Visual feedback for manual press
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text("Syncing with cloud..."),
+                    duration: Duration(seconds: 1),
+                  ),
+                );
+
+                try {
+                  await ref
+                      .read(whiteBoardListProvider.notifier)
+                      .syncWithBackend();
+
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text("Sync Complete!")),
+                    );
+                  }
+                } catch (e) {
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(
+                          "Sync Failed: ${e.toString().split(':').last}",
+                        ),
+                      ),
+                    );
+                  }
+                }
+              },
+            ),
+          ),
+        const SizedBox(width: 8),
         IconButton(
-          icon: Icon(Icons.undo, color: history.canUndo ? Colors.black54 : Colors.grey),
+          tooltip: "Share Board",
+          icon: Icon(
+            Icons.person_add_alt_1,
+            color: activeBoard.isSynced ? const Color(0xFF55B8B9) : Colors.grey,
+          ),
+          onPressed: () {
+            if (activeBoard.isSynced) {
+              showDialog(
+                context: context,
+                builder: (context) => ShareBoardDialog(documentId: activeBoard.id),
+              );
+            } else {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text("Please Sync the board to cloud before sharing.")),
+              );
+            }
+          },
+        ),
+        const SizedBox(width: 8),
+        IconButton(
+          icon: Icon(Icons.undo,
+              color: history.canUndo ? Colors.black54 : Colors.grey),
           onPressed: history.canUndo ? notifier.undo : null,
         ),
         IconButton(
-          icon: Icon(Icons.redo, color: history.canRedo ? Colors.black54 : Colors.grey),
+          icon: Icon(Icons.redo,
+              color: history.canRedo ? Colors.black54 : Colors.grey),
           onPressed: history.canRedo ? notifier.redo : null,
         ),
         if (isDesktopOrTablet)
           IconButton(
             icon: Icon(
               Icons.layers_outlined,
-              color: ref.watch(slideManagerVisibleProvider) ? const Color(0xFF55B8B9) : Colors.black54,
+              color: ref.watch(slideManagerVisibleProvider)
+                  ? const Color(0xFF55B8B9)
+                  : Colors.black54,
             ),
             onPressed: () {
-              ref.read(slideManagerVisibleProvider.notifier).state = !ref.read(slideManagerVisibleProvider);
+              ref.read(slideManagerVisibleProvider.notifier).state =
+                  !ref.read(slideManagerVisibleProvider);
             },
           ),
-        const SizedBox(width: 8),
+        const SizedBox(width: 8), 
+        
+        
       ],
     );
   }
@@ -202,7 +287,7 @@ class WhiteBoardToolbox extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final activeTool = ref.watch(toolStateProvider);
     final notifier = ref.read(toolStateProvider.notifier);
-    
+
     const List<(ToolType, IconData)> tools = [
       (ToolType.selection, Icons.touch_app_outlined),
       (ToolType.pan, Icons.pan_tool_outlined),
@@ -213,7 +298,7 @@ class WhiteBoardToolbox extends ConsumerWidget {
       (ToolType.circle, Icons.circle_outlined),
       (ToolType.arrow, Icons.arrow_forward_rounded),
       (ToolType.text, Icons.text_fields_outlined),
-      (ToolType.image, Icons.image_outlined),
+      // (ToolType.image, Icons.image_outlined),
     ];
 
     return Container(
@@ -237,7 +322,9 @@ class WhiteBoardToolbox extends ConsumerWidget {
                   width: isDesktop ? 40 : 36,
                   height: isDesktop ? 40 : 36,
                   decoration: BoxDecoration(
-                    color: isSelected ? const Color(0xFF55B8B9) : Colors.transparent,
+                    color: isSelected
+                        ? const Color(0xFF55B8B9)
+                        : Colors.transparent,
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Icon(
@@ -259,7 +346,8 @@ class DesktopBottomBar extends ConsumerWidget {
   final WhiteBoard whiteBoard;
   final ToolType activeTool;
 
-  const DesktopBottomBar({super.key, required this.whiteBoard, required this.activeTool});
+  const DesktopBottomBar(
+      {super.key, required this.whiteBoard, required this.activeTool});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -278,7 +366,9 @@ class DesktopBottomBar extends ConsumerWidget {
         children: [
           IconButton(
             icon: const Icon(Icons.chevron_left, color: Colors.black54),
-            onPressed: currentSlideIndex > 0 ? () => notifier.changeSlide(currentSlideIndex - 1) : null,
+            onPressed: currentSlideIndex > 0
+                ? () => notifier.changeSlide(currentSlideIndex - 1)
+                : null,
           ),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
@@ -288,7 +378,9 @@ class DesktopBottomBar extends ConsumerWidget {
             ),
             child: Text(
               '${currentSlideIndex + 1} / ${activeBoard.slides.length}',
-              style: const TextStyle(fontWeight: FontWeight.bold, color: Color.fromARGB(255, 237, 241, 241)),
+              style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: Color.fromARGB(255, 237, 241, 241)),
             ),
           ),
           IconButton(
@@ -303,14 +395,18 @@ class DesktopBottomBar extends ConsumerWidget {
           ),
           const Padding(
             padding: EdgeInsets.symmetric(horizontal: 10),
-            child: SizedBox(height: 24, child: VerticalDivider(color: Colors.black26)),
+            child: SizedBox(
+                height: 24, child: VerticalDivider(color: Colors.black26)),
           ),
           Expanded(
             child: Padding(
               padding: const EdgeInsets.only(left: 10),
               child: SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
-                child: ToolPropertiesPanel(whiteBoard: whiteBoard, activeTool: activeTool, isDesktop: true),
+                child: ToolPropertiesPanel(
+                    whiteBoard: whiteBoard,
+                    activeTool: activeTool,
+                    isDesktop: true),
               ),
             ),
           ),
@@ -324,7 +420,8 @@ class MobileBottomBar extends ConsumerWidget {
   final WhiteBoard whiteBoard;
   final ToolType activeTool;
 
-  const MobileBottomBar({super.key, required this.whiteBoard, required this.activeTool});
+  const MobileBottomBar(
+      {super.key, required this.whiteBoard, required this.activeTool});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -332,7 +429,7 @@ class MobileBottomBar extends ConsumerWidget {
     final activeBoard = history.currentBoard;
     final notifier = ref.read(activeBoardHistoryProvider(whiteBoard).notifier);
     final currentSlideIndex = activeBoard.currentSlideIndex;
-    
+
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       child: Container(
@@ -346,8 +443,11 @@ class MobileBottomBar extends ConsumerWidget {
           mainAxisAlignment: MainAxisAlignment.spaceAround,
           children: [
             IconButton(
-              icon: const Icon(Icons.arrow_upward_outlined, color: Colors.black54),
-              onPressed: currentSlideIndex > 0 ? () => notifier.changeSlide(currentSlideIndex - 1) : null,
+              icon: const Icon(Icons.arrow_upward_outlined,
+                  color: Colors.black54),
+              onPressed: currentSlideIndex > 0
+                  ? () => notifier.changeSlide(currentSlideIndex - 1)
+                  : null,
             ),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
@@ -357,11 +457,15 @@ class MobileBottomBar extends ConsumerWidget {
               ),
               child: Text(
                 '${currentSlideIndex + 1} / ${activeBoard.slides.length}',
-                style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF55B8B9), fontSize: 14),
+                style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFF55B8B9),
+                    fontSize: 14),
               ),
             ),
             IconButton(
-              icon: const Icon(Icons.arrow_downward_outlined, color: Colors.black54),
+              icon: const Icon(Icons.arrow_downward_outlined,
+                  color: Colors.black54),
               onPressed: currentSlideIndex < activeBoard.slides.length - 1
                   ? () => notifier.changeSlide(currentSlideIndex + 1)
                   : null,
@@ -371,22 +475,25 @@ class MobileBottomBar extends ConsumerWidget {
               onPressed: () => notifier.addSlide(),
             ),
             const SizedBox(width: 10),
-            
+
             // Reusing the Logic from ToolPropertiesPanel but adapted for Mobile Row
             // In Mobile, we just show properties directly in this row
-            ToolPropertiesPanel(whiteBoard: whiteBoard, activeTool: activeTool, isDesktop: false),
-            
-             const SizedBox(width: 10),
-             
-             // Current Active Tool Icon Indication
-             Container(
-               padding: const EdgeInsets.all(8),
-               decoration: BoxDecoration(
-                 color: const Color(0xFF86DAB9),
-                 borderRadius: BorderRadius.circular(8),
-               ),
-               child: ToolIconWidget(type: activeTool),
-             ),
+            ToolPropertiesPanel(
+                whiteBoard: whiteBoard,
+                activeTool: activeTool,
+                isDesktop: false),
+
+            const SizedBox(width: 10),
+
+            // Current Active Tool Icon Indication
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: const Color(0xFF86DAB9),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: ToolIconWidget(type: activeTool),
+            ),
           ],
         ),
       ),
@@ -412,13 +519,15 @@ class ToolPropertiesPanel extends ConsumerWidget {
     final optionsNotifier = ref.read(toolOptionsProvider.notifier);
     final selectedIds = ref.watch(selectedObjectIdsProvider(whiteBoard));
     final isObjectSelected = selectedIds.isNotEmpty;
-    final notifier = ref.read(activeBoardHistoryProvider(whiteBoard).notifier);
+    final notifier =
+        ref.read(activeBoardHistoryProvider(whiteBoard).notifier);
 
     // --- SELECTION Properties ---
     if (activeTool == ToolType.selection && isObjectSelected) {
       return Row(
         children: [
-          const Text("Selection:", style: TextStyle(fontWeight: FontWeight.w500, fontSize: 14)),
+          const Text("Selection:",
+              style: TextStyle(fontWeight: FontWeight.w500, fontSize: 14)),
           const SizedBox(width: 10),
           IconButton(
             icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
@@ -431,20 +540,22 @@ class ToolPropertiesPanel extends ConsumerWidget {
             onPressed: () => notifier.duplicateSelectedObjects(whiteBoard),
           ),
           const SizedBox(width: 10), // Reduced for mobile fit
-          if(isDesktop) const Text("Stroke: "),
+          if (isDesktop) const Text("Stroke: "),
           Tooltip(
             message: 'Set Stroke Color',
             child: InkWell(
-              onTap: () => DialogBoxes.showSelectedObjectColorPicker(context, ref, whiteBoard, 'color'),
+              onTap: () => DialogBoxes.showSelectedObjectColorPicker(
+                  context, ref, whiteBoard, 'color'),
               child: _buildColorCircleIcon(Icons.format_paint_outlined),
             ),
           ),
           const SizedBox(width: 10),
-          if(isDesktop) const Text("Fill: "),
-           Tooltip(
+          if (isDesktop) const Text("Fill: "),
+          Tooltip(
             message: 'Set Fill Color',
             child: InkWell(
-              onTap: () => DialogBoxes.showSelectedObjectColorPicker(context, ref, whiteBoard, 'fillColor'),
+              onTap: () => DialogBoxes.showSelectedObjectColorPicker(
+                  context, ref, whiteBoard, 'fillColor'),
               child: _buildColorCircleIcon(Icons.format_color_fill_outlined),
             ),
           ),
@@ -454,52 +565,79 @@ class ToolPropertiesPanel extends ConsumerWidget {
 
     // --- DRAWING Properties (Pencil, Shapes, Text, etc.) ---
     if ([
-      ToolType.pencil, ToolType.rectangle, ToolType.circle,
-      ToolType.line, ToolType.arrow, ToolType.text
+      ToolType.pencil,
+      ToolType.rectangle,
+      ToolType.circle,
+      ToolType.line,
+      ToolType.arrow,
+      ToolType.text
     ].contains(activeTool)) {
-       // Shared logic for both Mobile and Desktop (Mobile uses this widget inside the row)
-        return Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (isDesktop) ...[
-              const Padding(
-                padding: EdgeInsets.only(right: 10),
-                child: Text("Properties:", style: TextStyle(fontWeight: FontWeight.w500, fontSize: 14)),
+      // Shared logic for both Mobile and Desktop (Mobile uses this widget inside the row)
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (isDesktop) ...[
+            const Padding(
+              padding: EdgeInsets.only(right: 10),
+              child: Text("Properties:",
+                  style: TextStyle(fontWeight: FontWeight.w500, fontSize: 14)),
+            ),
+            SizedBox(
+              width: 150,
+              child: Slider(
+                value: options.strokeWidth,
+                activeColor: Colors.blue,
+                min: 1,
+                max: 16,
+                divisions: 15,
+                onChanged: (v) =>
+                    optionsNotifier.state = options.copyWith(strokeWidth: v),
               ),
-              SizedBox(
-                width: 150,
-                child: Slider(
-                  value: options.strokeWidth,
-                  activeColor: Colors.blue,
-                  min: 1,
-                  max: 16,
-                  divisions: 15,
-                  onChanged: (v) => optionsNotifier.state = options.copyWith(strokeWidth: v),
+            ),
+            const SizedBox(width: 10),
+            SizedBox(
+              width: 30,
+              child: Text(
+                options.strokeWidth.toStringAsFixed(0),
+                style: const TextStyle(fontWeight: FontWeight.bold),
+                textAlign: TextAlign.center,
+              ),
+            ),
+            const SizedBox(width: 20),
+            const Text("Color: "),
+          ],
+
+          // Stroke Color
+          Tooltip(
+            message: 'Select Stroke Color',
+            child: InkWell(
+              onTap: () => DialogBoxes.showColorPicker(context, ref, 'color'),
+              child: Container(
+                width: 24,
+                height: 24,
+                decoration: BoxDecoration(
+                  color: Helpers.colorFromHex(options.color),
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.black26),
                 ),
               ),
-              const SizedBox(width: 10),
-              SizedBox(
-                width: 30,
-                child: Text(
-                  options.strokeWidth.toStringAsFixed(0),
-                  style: const TextStyle(fontWeight: FontWeight.bold),
-                  textAlign: TextAlign.center,
-                ),
-              ),
-              const SizedBox(width: 20),
-              const Text("Color: "),
-            ],
-            
-            // Stroke Color
+            ),
+          ),
+          const SizedBox(width: 10),
+
+          // Fill Color (Shapes only)
+          if ([ToolType.rectangle, ToolType.circle].contains(activeTool)) ...[
+            if (isDesktop) const Text("Fill: "),
             Tooltip(
-              message: 'Select Stroke Color',
+              message: 'Select Fill Color',
               child: InkWell(
-                onTap: () => DialogBoxes.showColorPicker(context, ref, 'color'),
+                onTap: () =>
+                    DialogBoxes.showColorPicker(context, ref, 'fillColor'),
                 child: Container(
                   width: 24,
                   height: 24,
                   decoration: BoxDecoration(
-                    color: Helpers.colorFromHex(options.color),
+                    color: Helpers.colorFromHex(options.fillColor),
                     shape: BoxShape.circle,
                     border: Border.all(color: Colors.black26),
                   ),
@@ -507,127 +645,114 @@ class ToolPropertiesPanel extends ConsumerWidget {
               ),
             ),
             const SizedBox(width: 10),
-            
-            // Fill Color (Shapes only)
-            if ([ToolType.rectangle, ToolType.circle].contains(activeTool)) ...[
-              if(isDesktop) const Text("Fill: "),
-              Tooltip(
-                message: 'Select Fill Color',
-                child: InkWell(
-                  onTap: () => DialogBoxes.showColorPicker(context, ref, 'fillColor'),
-                  child: Container(
-                    width: 24,
-                    height: 24,
-                    decoration: BoxDecoration(
-                      color: Helpers.colorFromHex(options.fillColor),
-                      shape: BoxShape.circle,
-                      border: Border.all(color: Colors.black26),
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 10),
-            ],
-            
-            // Mobile Specific: Stroke Width Trigger
-            if (!isDesktop)
-               GestureDetector(
-                onTap: () => DialogBoxes.showStrokeWidthSelector(context, ref),
-                child: Container(
-                  width: 32,
-                  height: 32,
-                  decoration: BoxDecoration(
-                    border: Border.all(color: Colors.black, width: 1.0),
-                    borderRadius: BorderRadius.circular(5),
-                  ),
-                  child: Center(
-                    child: Text(
-                      options.strokeWidth.round().toString(),
-                      style: const TextStyle(fontSize: 12),
-                    ),
-                  ),
-                ),
-              ),
           ],
-        );
+
+          // Mobile Specific: Stroke Width Trigger
+          if (!isDesktop)
+            GestureDetector(
+              onTap: () => DialogBoxes.showStrokeWidthSelector(context, ref),
+              child: Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  border: Border.all(color: Colors.black, width: 1.0),
+                  borderRadius: BorderRadius.circular(5),
+                ),
+                child: Center(
+                  child: Text(
+                    options.strokeWidth.round().toString(),
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      );
     }
 
     // --- ERASER Properties ---
     if (activeTool == ToolType.eraser) {
-       return Row(
-         mainAxisSize: MainAxisSize.min,
-         children: [
-           if (isDesktop)
-             const Padding(
-               padding: EdgeInsets.only(right: 10),
-               child: Text("Eraser:", style: TextStyle(fontWeight: FontWeight.w500, fontSize: 14)),
-             ),
-           IconButton(
-             icon: Icon(
-               Icons.show_chart,
-               color: options.eraserMode == EraserMode.stroke ? const Color(0xFF55B8B9) : Colors.black54,
-             ),
-             tooltip: 'Erase by object/stroke',
-             onPressed: () => optionsNotifier.state = options.copyWith(eraserMode: EraserMode.stroke),
-           ),
-           IconButton(
-             icon: Icon(
-               Icons.brush,
-               color: options.eraserMode == EraserMode.pixel ? const Color(0xFF55B8B9) : Colors.black54,
-             ),
-             tooltip: 'Pixel eraser',
-             onPressed: () => optionsNotifier.state = options.copyWith(eraserMode: EraserMode.pixel),
-           ),
-           const SizedBox(width: 10),
-           
-           if (isDesktop) ...[
-             SizedBox(
-               width: 150,
-               child: Slider(
-                 value: options.eraserSize,
-                 activeColor: Colors.grey,
-                 min: 5,
-                 max: 50,
-                 divisions: 9,
-                 onChanged: (v) => optionsNotifier.state = options.copyWith(eraserSize: v),
-               ),
-             ),
-             const SizedBox(width: 10),
-             SizedBox(
-               width: 30,
-               child: Text(
-                 options.eraserSize.toStringAsFixed(0),
-                 style: const TextStyle(fontWeight: FontWeight.bold),
-                 textAlign: TextAlign.center,
-               ),
-             ),
-           ] else ...[
-             // Mobile Eraser Size Selector
-             GestureDetector(
-               onTap: () => DialogBoxes.showEraserSizeSelector(context, ref),
-               child: Container(
-                 width: 32,
-                 height: 32,
-                 decoration: BoxDecoration(
-                   border: Border.all(color: Colors.black, width: 1.0),
-                   borderRadius: BorderRadius.circular(5),
-                 ),
-                 child: Center(
-                   child: Text(
-                     options.eraserSize.round().toString(),
-                     style: const TextStyle(fontSize: 12),
-                   ),
-                 ),
-               ),
-             ),
-           ],
-         ],
-       );
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (isDesktop)
+            const Padding(
+              padding: EdgeInsets.only(right: 10),
+              child: Text("Eraser:",
+                  style: TextStyle(fontWeight: FontWeight.w500, fontSize: 14)),
+            ),
+          IconButton(
+            icon: Icon(
+              Icons.show_chart,
+              color: options.eraserMode == EraserMode.stroke
+                  ? const Color(0xFF55B8B9)
+                  : Colors.black54,
+            ),
+            tooltip: 'Erase by object/stroke',
+            onPressed: () => optionsNotifier.state =
+                options.copyWith(eraserMode: EraserMode.stroke),
+          ),
+          IconButton(
+            icon: Icon(
+              Icons.brush,
+              color: options.eraserMode == EraserMode.pixel
+                  ? const Color(0xFF55B8B9)
+                  : Colors.black54,
+            ),
+            tooltip: 'Pixel eraser',
+            onPressed: () => optionsNotifier.state =
+                options.copyWith(eraserMode: EraserMode.pixel),
+          ),
+          const SizedBox(width: 10),
+          if (isDesktop) ...[
+            SizedBox(
+              width: 150,
+              child: Slider(
+                value: options.eraserSize,
+                activeColor: Colors.grey,
+                min: 5,
+                max: 50,
+                divisions: 9,
+                onChanged: (v) =>
+                    optionsNotifier.state = options.copyWith(eraserSize: v),
+              ),
+            ),
+            const SizedBox(width: 10),
+            SizedBox(
+              width: 30,
+              child: Text(
+                options.eraserSize.toStringAsFixed(0),
+                style: const TextStyle(fontWeight: FontWeight.bold),
+                textAlign: TextAlign.center,
+              ),
+            ),
+          ] else ...[
+            // Mobile Eraser Size Selector
+            GestureDetector(
+              onTap: () => DialogBoxes.showEraserSizeSelector(context, ref),
+              child: Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  border: Border.all(color: Colors.black, width: 1.0),
+                  borderRadius: BorderRadius.circular(5),
+                ),
+                child: Center(
+                  child: Text(
+                    options.eraserSize.round().toString(),
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ],
+      );
     }
 
     return const SizedBox.shrink();
   }
-  
+
   Widget _buildColorCircleIcon(IconData icon) {
     return Container(
       width: 24,
@@ -665,7 +790,8 @@ class SlideManagerWidget extends ConsumerWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Text('SLIDES', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+          const Text('SLIDES',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
           const Divider(height: 10),
           Expanded(
             child: ReorderableListView.builder(
@@ -680,7 +806,8 @@ class SlideManagerWidget extends ConsumerWidget {
                 final slide = activeBoard.slides[index];
                 return Card(
                   key: ValueKey(activeBoard.slides[index].id),
-                  margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
+                  margin:
+                      const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
                   color: isSelected ? const Color(0xFF55B8B9) : Colors.white,
                   child: Padding(
                     padding: const EdgeInsets.only(right: 8.0),
@@ -699,16 +826,20 @@ class SlideManagerWidget extends ConsumerWidget {
                           Align(
                             alignment: AlignmentGeometry.bottomRight,
                             child: IconButton(
-                              icon: const Icon(Icons.delete_outline, size: 20, color: Colors.redAccent),
+                              icon: const Icon(Icons.delete_outline,
+                                  size: 20, color: Colors.redAccent),
                               onPressed: () {
                                 if (activeBoard.slides.length > 1) {
                                   notifier.deleteSlide(index);
                                 } else {
                                   DialogBoxes.showWarningDialog(
                                     context,
-                                    message: "Atleast one slide needed Or WhiteBoard will be deleted on 'OK'",
+                                    message:
+                                        "Atleast one slide needed Or WhiteBoard will be deleted on 'OK'",
                                     onConfirm: () {
-                                      ref.read(whiteBoardListProvider.notifier).deleteBoard(activeBoard.id);
+                                      ref
+                                          .read(whiteBoardListProvider.notifier)
+                                          .deleteBoard(activeBoard.id);
                                       Navigator.of(context).pop();
                                     },
                                   );
@@ -728,7 +859,8 @@ class SlideManagerWidget extends ConsumerWidget {
             onPressed: notifier.addSlide,
             label: 'Add Slide',
             icon: Icons.add,
-            gradient: const LinearGradient(colors: [Color(0xFFD48FFC), Color(0xFFA671FF)]),
+            gradient: const LinearGradient(
+                colors: [Color(0xFFD48FFC), Color(0xFFA671FF)]),
           ),
         ],
       ),
@@ -743,16 +875,22 @@ class ToolIconWidget extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return switch (type) {
-      ToolType.selection => const Icon(Icons.touch_app_outlined, color: Colors.white),
+      ToolType.selection =>
+        const Icon(Icons.touch_app_outlined, color: Colors.white),
       ToolType.pan => const Icon(Icons.pan_tool_outlined, color: Colors.white),
       ToolType.pencil => const Icon(Icons.brush_outlined, color: Colors.white),
-      ToolType.eraser => const Icon(Icons.cleaning_services_outlined, color: Colors.white),
+      ToolType.eraser =>
+        const Icon(Icons.cleaning_services_outlined, color: Colors.white),
       ToolType.rectangle => const Icon(Icons.crop_square, color: Colors.white),
-      ToolType.circle => const Icon(Icons.circle_outlined, color: Colors.white),
-      ToolType.arrow => const Icon(Icons.arrow_forward_rounded, color: Colors.white),
-      ToolType.line => const Icon(Icons.horizontal_rule_rounded, color: Colors.white),
-      ToolType.text => const Icon(Icons.text_fields_outlined, color: Colors.white),
-      ToolType.image => const Icon(Icons.image_outlined, color: Colors.white),
+      ToolType.circle =>
+        const Icon(Icons.circle_outlined, color: Colors.white),
+      ToolType.arrow =>
+        const Icon(Icons.arrow_forward_rounded, color: Colors.white),
+      ToolType.line =>
+        const Icon(Icons.horizontal_rule_rounded, color: Colors.white),
+      ToolType.text =>
+        const Icon(Icons.text_fields_outlined, color: Colors.white),
+      // ToolType.image => const Icon(Icons.image_outlined, color: Colors.white),
     };
   }
 }
@@ -777,7 +915,10 @@ class _GradientButton extends StatelessWidget {
         borderRadius: BorderRadius.circular(10),
         gradient: gradient,
         boxShadow: [
-          BoxShadow(color: Colors.black.withAlpha(26), blurRadius: 4, offset: const Offset(0, 2)),
+          BoxShadow(
+              color: Colors.black.withAlpha(26),
+              blurRadius: 4,
+              offset: const Offset(0, 2)),
         ],
       ),
       child: Material(
@@ -794,7 +935,10 @@ class _GradientButton extends StatelessWidget {
                 const SizedBox(width: 6),
                 Text(
                   label,
-                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14),
                 ),
               ],
             ),

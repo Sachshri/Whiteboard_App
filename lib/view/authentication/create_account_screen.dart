@@ -17,15 +17,12 @@ class CreateAccountScreen extends ConsumerWidget {
       resizeToAvoidBottomInset: true,
       body: Stack(
         children: [
-          // 1. BACKGROUND IMAGE
           Positioned.fill(
             child: Image.asset(
               'assets/background.png',
               fit: BoxFit.cover,
             ),
           ),
-
-          // 2. CONTENT LAYER
           Center(
             child: isDesktop ? const DesktopCard() : const MobileLayout(),
           ),
@@ -49,6 +46,10 @@ class _SignUpFormState extends ConsumerState<SignUpForm> {
   final TextEditingController _passwordController = TextEditingController();
   final TextEditingController _confirmPasswordController = TextEditingController();
 
+  // STATE FOR VISIBILITY
+  bool _isPasswordVisible = false;
+  bool _isConfirmPasswordVisible = false;
+
   @override
   void dispose() {
     _usernameController.dispose();
@@ -63,17 +64,17 @@ class _SignUpFormState extends ConsumerState<SignUpForm> {
     final authState = ref.watch(authProvider);
 
     ref.listen(authProvider, (previous, next) {
-      // 1. Handle Errors
       if (next.errorMessage != null && next.errorMessage!.isNotEmpty) {
-         AppSnackBar.show(context, message: next.errorMessage!, isError: true);
-         ref.read(authProvider.notifier).clearError();
+         if (previous?.errorMessage != next.errorMessage) {
+            AppSnackBar.show(context, message: next.errorMessage!, isError: true);
+            ref.read(authProvider.notifier).clearError();
+         }
       }
 
-      // 2. Handle Success (Registration)
-      // Assuming registration sets loading=false and error=null, but keeps user=null (waiting for login)
-      if (!next.isLoading && next.errorMessage == null && previous!.isLoading) {
+      // If registration is successful (loading stops, no error, but we were loading before)
+      if (!next.isLoading && next.errorMessage == null && (previous?.isLoading ?? false)) {
          AppSnackBar.show(context, message: "Account created! Please Login.", isError: false);
-         Navigator.pop(context);
+         Navigator.pop(context); // Go back to login screen
       }
     });
 
@@ -83,7 +84,6 @@ class _SignUpFormState extends ConsumerState<SignUpForm> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          // 1. LOGO
           SizedBox(
             height: 80,
             width: 80,
@@ -93,8 +93,6 @@ class _SignUpFormState extends ConsumerState<SignUpForm> {
             ),
           ),
           const SizedBox(height: 24),
-
-          // 2. TITLE & SUBTITLE
           Text(
             "Create Account",
             style: Theme.of(context).textTheme.headlineMedium?.copyWith(
@@ -110,8 +108,6 @@ class _SignUpFormState extends ConsumerState<SignUpForm> {
                 ),
           ),
           const SizedBox(height: 32),
-
-          // 3. FORM FIELDS
 
           // Username
           CustomTextFormField(
@@ -142,15 +138,26 @@ class _SignUpFormState extends ConsumerState<SignUpForm> {
           ),
           const SizedBox(height: 16),
 
-          // Password
+          // Password (FIXED VISIBILITY)
           CustomTextFormField(
             controller: _passwordController,
             showOutlineBorder: true,
             label: "Password",
             hintText: "Create a password",
             prefixIcon: Icons.lock_outline,
-            suffixIcon: const Icon(Icons.visibility_off_outlined),
-            obscureText: true,
+            obscureText: !_isPasswordVisible,
+            suffixIcon: IconButton(
+              icon: Icon(
+                _isPasswordVisible 
+                  ? Icons.visibility_outlined 
+                  : Icons.visibility_off_outlined
+              ),
+              onPressed: () {
+                setState(() {
+                  _isPasswordVisible = !_isPasswordVisible;
+                });
+              },
+            ),
             validator: (value) {
               if (value == null || value.isEmpty) return 'Password is required';
               if (value.length < 6) return 'Password must be at least 6 chars';
@@ -159,15 +166,26 @@ class _SignUpFormState extends ConsumerState<SignUpForm> {
           ),
           const SizedBox(height: 16),
 
-          // Confirm Password
+          // Confirm Password (FIXED VISIBILITY)
           CustomTextFormField(
             controller: _confirmPasswordController,
             showOutlineBorder: true,
             label: "Confirm Password",
             hintText: "Re-enter password",
             prefixIcon: Icons.lock_outline,
-            suffixIcon: const Icon(Icons.visibility_off_outlined),
-            obscureText: true,
+            obscureText: !_isConfirmPasswordVisible,
+            suffixIcon: IconButton(
+               icon: Icon(
+                _isConfirmPasswordVisible 
+                  ? Icons.visibility_outlined 
+                  : Icons.visibility_off_outlined
+              ),
+              onPressed: () {
+                setState(() {
+                  _isConfirmPasswordVisible = !_isConfirmPasswordVisible;
+                });
+              },
+            ),
             validator: (value) {
               if (value != _passwordController.text) return 'Passwords do not match';
               return null;
@@ -176,7 +194,7 @@ class _SignUpFormState extends ConsumerState<SignUpForm> {
 
           const SizedBox(height: 24),
 
-          // 4. SIGN UP BUTTON
+          // SIGN UP BUTTON
           SizedBox(
             width: double.infinity,
             height: 50,
@@ -206,7 +224,7 @@ class _SignUpFormState extends ConsumerState<SignUpForm> {
           ),
           const SizedBox(height: 16),
 
-          // 5. LOGIN REDIRECT
+          // LOGIN REDIRECT
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
